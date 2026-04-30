@@ -59,6 +59,22 @@ def _parse_iso(value: str) -> datetime:
     return datetime.strptime(value, _TS_FORMAT).replace(tzinfo=timezone.utc)
 
 
+def _coerce_captured_at(value: Any) -> datetime | None:
+    """Accept either a datetime or an ISO-8601 string, return a UTC datetime."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        s = value.rstrip("Z")
+        try:
+            dt = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return None
+
+
 def _meta_from_frontmatter(meta: dict[str, Any], rel_path: str) -> DocMeta:
     extra = {k: v for k, v in meta.items() if k not in _RESERVED_KEYS and k not in {
         "title", "source", "type", "tags",
@@ -141,11 +157,7 @@ class MarkdownStore:
         user_meta = dict(frontmatter_in or {})
         doc_id = new_id()
         now = _now()
-        captured_at = (
-            user_meta["captured_at"]
-            if isinstance(user_meta.get("captured_at"), datetime)
-            else now
-        )
+        captured_at = _coerce_captured_at(user_meta.get("captured_at")) or now
         user_meta.pop("captured_at", None)
 
         target = paths.doc_path(self.root, doc_id, captured_at, user_meta.get("title"))
@@ -207,11 +219,7 @@ class MarkdownStore:
                 raise Conflict("if_match given but doc does not exist") from None
             user_meta = dict(frontmatter_in or {})
             now = _now()
-            captured_at = (
-                user_meta["captured_at"]
-                if isinstance(user_meta.get("captured_at"), datetime)
-                else now
-            )
+            captured_at = _coerce_captured_at(user_meta.get("captured_at")) or now
             user_meta.pop("captured_at", None)
             target = paths.doc_path(self.root, doc_id, captured_at, user_meta.get("title"))
             rel = paths.relative_to_root(self.root, target)
