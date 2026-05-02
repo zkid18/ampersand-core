@@ -125,10 +125,17 @@ class SearchIndex:
         match_query = _build_match(query, mode)
 
         try:
+            # FTS5 bm25 weights are positional, one per column INCLUDING
+            # UNINDEXED ones (their weight is ignored but the slot is needed).
+            # Column order: doc_id, section_path, section_title, section_body,
+            # content_hash. We weight section_title 5× to make title hits
+            # dominate over body-density hits — a query like "how to make
+            # wealth" should rank an essay literally titled that above an
+            # email that just mentions Paul Graham a lot.
             rows = self._conn.execute(
                 "SELECT doc_id, section_path, section_title, "
                 "       snippet(sections, 3, '<mark>', '</mark>', '…', 32) AS snip, "
-                "       bm25(sections) AS score "
+                "       bm25(sections, 0.0, 0.0, 5.0, 1.0, 0.0) AS score "
                 "FROM sections "
                 "WHERE sections MATCH ? "
                 "ORDER BY score "
