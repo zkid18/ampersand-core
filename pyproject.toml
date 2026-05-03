@@ -18,6 +18,7 @@ dependencies = [
     "feedparser>=6.0",
     "playwright>=1.40",
     "python-ulid>=2.0",
+    "youtube-transcript-api>=1.0",
 ]
 
 [project.optional-dependencies]
