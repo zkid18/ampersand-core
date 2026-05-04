@@ -13,7 +13,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from bs4 import BeautifulSoup
-from markdownify import markdownify
+try:
+    from html_to_markdown import convert as _html_to_md_convert  # type: ignore[import-not-found]
+    _HAS_KREUZBERG = True
+except ImportError:  # pragma: no cover
+    _HAS_KREUZBERG = False
+
+from markdownify import markdownify  # fallback if kreuzberg isn't installed
 
 from ampersand_core.models import CapturedContent, ContentType
 
@@ -211,8 +217,12 @@ def _html_to_clean_markdown(html: str) -> str:
 
     clean_html = str(soup)
 
-    # Convert to markdown
-    md = markdownify(clean_html, heading_style="ATX")
+    # Convert to markdown — prefer kreuzberg's html_to_markdown (Rust, faster,
+    # cleaner table/link handling), fall back to markdownify if not installed.
+    if _HAS_KREUZBERG:
+        md = _html_to_md_convert(clean_html).content
+    else:
+        md = markdownify(clean_html, heading_style="ATX")
 
     # Clean up the result
     md = _clean_markdown(md)
