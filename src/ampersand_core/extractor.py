@@ -162,6 +162,36 @@ def _fetch_via_proxy(url: str) -> str | None:
     return None
 
 
+# Fingerprints of pages that "succeed" at the HTTP layer but are really
+# anti-bot interstitials. We don't want to save these as docs — the bot
+# would happily store "Please complete the verification" as an article.
+_CHALLENGE_FINGERPRINTS = (
+    "Ваш IP-адрес",                         # Russian IP-challenge variant
+    "Пожалуйста, пройдите проверку",        # "Please pass verification"
+    "Just a moment...",                     # Cloudflare interstitial
+    "Verifying you are human",              # Cloudflare Turnstile
+    "Checking if the site connection is secure",  # Cloudflare
+    "Attention Required! | Cloudflare",
+    "DDoS protection by Cloudflare",
+    "Please complete the security check",
+    "Please verify you are a human",
+    "Enable JavaScript and cookies to continue",
+)
+
+
+def _looks_like_challenge(text: str, title: str | None) -> bool:
+    if not text:
+        return False
+    head = text[:1500]
+    for needle in _CHALLENGE_FINGERPRINTS:
+        if needle in head:
+            return True
+    # Cloudflare challenge titles are exact strings
+    if title in {"Just a moment...", "Attention Required! | Cloudflare"}:
+        return True
+    return False
+
+
 def extract_article(url: str) -> CapturedContent:
     """Fetch a URL and extract its article content as markdown."""
     downloaded = _fetch_url(url)
@@ -198,23 +228,26 @@ def extract_article(url: str) -> CapturedContent:
     if not text:
         raise ValueError(f"Failed to extract content from: {url}")
 
+    # Extract metadata up front so we can use the title in the challenge check.
+    metadata = trafilatura.extract_metadata(downloaded)
+    title = metadata.title if metadata and metadata.title else None
+
+    if _looks_like_challenge(text, title):
+        raise ValueError(
+            f"Anti-bot challenge served for {url} — site requires "
+            f"interactive verification, capture aborted."
+        )
+
     # Clean up empty image tags and table artifacts
     text = re.sub(r"!\[\]\(\)\s*\|?\s*", "", text)
     text = re.sub(r"^\|?\s*\n", "", text, flags=re.MULTILINE)
     text = text.lstrip("\n")
 
-    # Extract metadata
-    metadata = trafilatura.extract_metadata(downloaded)
-
-    title = "Untitled"
-    author = None
-    if metadata:
-        title = metadata.title or title
-        author = metadata.author
+    author = metadata.author if metadata else None
 
     return CapturedContent(
         url=url,
-        title=title,
+        title=title or "Untitled",
         content_markdown=text,
         content_type=ContentType.ARTICLE,
         author=author,
