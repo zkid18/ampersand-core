@@ -323,6 +323,20 @@ class MarkdownStore:
             next_cursor = base64.urlsafe_b64encode(raw).decode("ascii")
         return ListPage(items=page_items, next_cursor=next_cursor)
 
+    def find_by_source(self, source: str) -> DocMeta | None:
+        """Return DocMeta for the first doc with this source URL, or None.
+
+        O(1) via the source index — used by feed ingest to dedupe entries
+        we've already captured.
+        """
+        doc_id = self._meta_index.find_id_by_source(source)
+        if doc_id is None:
+            return None
+        try:
+            return self.get(doc_id).meta
+        except NotFound:
+            return None
+
     def iter_all(self) -> Iterator[DocMeta]:
         docs_dir = paths.docs_root(self.root)
         if not docs_dir.exists():

@@ -47,6 +47,8 @@ CREATE INDEX IF NOT EXISTS idx_docs_updated_id
 
 CREATE INDEX IF NOT EXISTS idx_docs_captured_id
     ON docs(captured_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source);
 """
 
 _ORDER_COLUMNS = {"updated": "updated_at", "captured": "captured_at"}
@@ -133,6 +135,13 @@ class MetaIndex:
 
     def is_empty(self) -> bool:
         return self._conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0] == 0
+
+    def find_id_by_source(self, source: str) -> str | None:
+        """Return the doc_id of the first doc with this source URL, or None."""
+        row = self._conn.execute(
+            "SELECT id FROM docs WHERE source = ? LIMIT 1", (source,)
+        ).fetchone()
+        return row[0] if row else None
 
     def count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
