@@ -44,7 +44,12 @@ CREATE TABLE IF NOT EXISTS docs (
 
 CREATE INDEX IF NOT EXISTS idx_docs_updated_id
     ON docs(updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_docs_captured_id
+    ON docs(captured_at DESC, id DESC);
 """
+
+_ORDER_COLUMNS = {"updated": "updated_at", "captured": "captured_at"}
 
 
 def _iso(dt: datetime) -> str:
@@ -136,23 +141,30 @@ class MetaIndex:
         self,
         *,
         since: datetime | None = None,
-        cursor_updated_at: datetime | None = None,
+        cursor_ts: datetime | None = None,
         cursor_id: str | None = None,
         limit: int = 100,
+        order: str = "updated",
     ) -> list[tuple]:
-        """Return up to `limit` rows ordered by (updated_at DESC, id DESC).
+        """Return up to `limit` rows ordered by (<order_col> DESC, id DESC).
 
-        Cursor semantics: rows STRICTLY BEFORE (cursor_updated_at, cursor_id)
-        in the same ordering. `since` filters by updated_at >= since.
+        order: "updated" sorts by updated_at, "captured" by captured_at.
+        Cursor semantics: rows STRICTLY BEFORE (cursor_ts, cursor_id) in the
+        same ordering. `since` filters by updated_at >= since (semantically
+        independent of `order`).
         """
+        col = _ORDER_COLUMNS.get(order)
+        if col is None:
+            raise StoreError(f"unknown order: {order!r}")
+
         clauses: list[str] = []
         params: list = []
         if since is not None:
             clauses.append("updated_at >= ?")
             params.append(_iso(since))
-        if cursor_updated_at is not None and cursor_id is not None:
-            cur = _iso(cursor_updated_at)
-            clauses.append("(updated_at < ? OR (updated_at = ? AND id < ?))")
+        if cursor_ts is not None and cursor_id is not None:
+            cur = _iso(cursor_ts)
+            clauses.append(f"({col} < ? OR ({col} = ? AND id < ?))")
             params.extend([cur, cur, cursor_id])
 
         sql = (
@@ -161,7 +173,7 @@ class MetaIndex:
         )
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        sql += f" ORDER BY {col} DESC, id DESC LIMIT ?"
         params.append(limit)
         try:
             return self._conn.execute(sql, params).fetchall()

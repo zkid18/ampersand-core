@@ -72,13 +72,44 @@ def test_list_rows_cursor_pagination(tmp_path: Path) -> None:
     assert len(page1) == 2
     last = row_to_kwargs(page1[-1])
     page2 = idx.list_rows(
-        cursor_updated_at=last["updated_at"],
+        cursor_ts=last["updated_at"],
         cursor_id=last["id"],
         limit=10,
     )
     assert len(page2) == 3
     seen = [row_to_kwargs(r)["id"] for r in page1 + page2]
     assert len(set(seen)) == 5  # no duplicates across pages
+
+
+def test_list_rows_order_by_captured(tmp_path: Path) -> None:
+    """captured_at sort is independent of updated_at — a doc captured long
+    ago but updated yesterday should sort low under order=captured."""
+    idx = MetaIndex(tmp_path / "meta.db")
+    old_capture = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    new_capture = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    yesterday = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+    idx.upsert(type("M", (), dict(  # captured long ago, updated yesterday
+        id="01OLD", path="docs/old.md", title=None, source=None,
+        content_type=None, captured_at=old_capture, updated_at=yesterday,
+        tags=[], extra={}, content_hash="h",
+    )))
+    idx.upsert(type("M", (), dict(  # captured recently, untouched
+        id="01NEW", path="docs/new.md", title=None, source=None,
+        content_type=None, captured_at=new_capture, updated_at=new_capture,
+        tags=[], extra={}, content_hash="h",
+    )))
+
+    by_updated = [row_to_kwargs(r)["id"] for r in idx.list_rows(order="updated")]
+    by_captured = [row_to_kwargs(r)["id"] for r in idx.list_rows(order="captured")]
+    assert by_updated == ["01OLD", "01NEW"]    # updated yesterday wins
+    assert by_captured == ["01NEW", "01OLD"]   # captured recently wins
+
+
+def test_list_rows_unknown_order_raises(tmp_path: Path) -> None:
+    idx = MetaIndex(tmp_path / "meta.db")
+    with pytest.raises(Exception):
+        idx.list_rows(order="bogus")
 
 
 def test_list_rows_since_filter(tmp_path: Path) -> None:

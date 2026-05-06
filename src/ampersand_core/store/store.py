@@ -282,14 +282,15 @@ class MarkdownStore:
         since: datetime | None = None,
         cursor: str | None = None,
         limit: int = 100,
+        order: str = "updated",
     ) -> ListPage:
-        cursor_dt: datetime | None = None
+        cursor_ts: datetime | None = None
         cursor_id: str | None = None
         if cursor:
             try:
                 decoded = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
                 cur_iso, cur_id = decoded.split("|", 1)
-                cursor_dt = _parse_iso(cur_iso)
+                cursor_ts = _parse_iso(cur_iso)
                 cursor_id = cur_id
             except Exception as exc:
                 raise StoreError(f"invalid cursor: {cursor!r}") from exc
@@ -306,9 +307,10 @@ class MarkdownStore:
         # Fetch limit+1 to detect "has more" without a separate count.
         rows = self._meta_index.list_rows(
             since=since_utc,
-            cursor_updated_at=cursor_dt,
+            cursor_ts=cursor_ts,
             cursor_id=cursor_id,
             limit=limit + 1,
+            order=order,
         )
         has_more = len(rows) > limit
         rows = rows[:limit]
@@ -316,7 +318,8 @@ class MarkdownStore:
         next_cursor: str | None = None
         if has_more and page_items:
             last = page_items[-1]
-            raw = f"{_iso(last.updated_at)}|{last.id}".encode("utf-8")
+            ts = last.captured_at if order == "captured" else last.updated_at
+            raw = f"{_iso(ts)}|{last.id}".encode("utf-8")
             next_cursor = base64.urlsafe_b64encode(raw).decode("ascii")
         return ListPage(items=page_items, next_cursor=next_cursor)
 
