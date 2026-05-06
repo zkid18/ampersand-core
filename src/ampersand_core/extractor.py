@@ -162,34 +162,79 @@ def _fetch_via_proxy(url: str) -> str | None:
     return None
 
 
-# Fingerprints of pages that "succeed" at the HTTP layer but are really
-# anti-bot interstitials. We don't want to save these as docs — the bot
-# would happily store "Please complete the verification" as an article.
-_CHALLENGE_FINGERPRINTS = (
-    "Ваш IP-адрес",                         # Russian IP-challenge variant
-    "Пожалуйста, пройдите проверку",        # "Please pass verification"
-    "Just a moment...",                     # Cloudflare interstitial
-    "Verifying you are human",              # Cloudflare Turnstile
-    "Checking if the site connection is secure",  # Cloudflare
-    "Attention Required! | Cloudflare",
-    "DDoS protection by Cloudflare",
-    "Please complete the security check",
-    "Please verify you are a human",
-    "Enable JavaScript and cookies to continue",
+# HTML markers (widgets/scripts) that indicate the page is an anti-bot
+# wall, regardless of the wall's display language. These are concrete
+# structural elements, not localized strings.
+_CHALLENGE_HTML_MARKERS = (
+    "challenges.cloudflare.com",        # Cloudflare Turnstile widget
+    "/cdn-cgi/challenge-platform/",     # Cloudflare challenge platform
+    "g-recaptcha",                      # Google reCAPTCHA widget
+    "h-captcha",                        # hCaptcha widget
+    "data-sitekey=",                    # generic captcha sitekey attribute
+)
+
+# Title patterns that strongly suggest the page is a wall, not content.
+# Substring match is intentional — Cloudflare/Akamai/etc localize the
+# trailing text but keep these stems.
+_CHALLENGE_TITLE_STEMS = (
+    "just a moment",
+    "attention required",
+    "access denied",
+    "ddos protection",
+    "verify you are",
+    "verifying you are",
+    "checking your browser",
+    "security check",
 )
 
 
-def _looks_like_challenge(text: str, title: str | None) -> bool:
-    if not text:
-        return False
-    head = text[:1500]
-    for needle in _CHALLENGE_FINGERPRINTS:
-        if needle in head:
-            return True
-    # Cloudflare challenge titles are exact strings
-    if title in {"Just a moment...", "Attention Required! | Cloudflare"}:
+def _looks_like_challenge(text: str | None, title: str | None, html: str | None) -> bool:
+    """Heuristic: does this look like a wall/challenge page rather than an
+    article? Three orthogonal signals — any one trips it:
+
+    1. Concrete HTML widget markers (Cloudflare/captcha) anywhere in the
+       fetched HTML. Language-independent.
+    2. Title is a known wall-page stem ("Just a Moment...", "Access Denied").
+    3. Extracted text body is suspiciously short AND the title is missing
+       or generic — articles with weak metadata still tend to have body.
+
+    Real articles can be short, so we lean on combinations rather than
+    length alone.
+    """
+    if html:
+        h = html[:50_000]  # cap scan for huge SPA payloads
+        for marker in _CHALLENGE_HTML_MARKERS:
+            if marker in h:
+                return True
+
+    norm_title = (title or "").strip().lower()
+    if norm_title:
+        for stem in _CHALLENGE_TITLE_STEMS:
+            if stem in norm_title:
+                return True
+
+    body = (text or "").strip()
+    weak_title = norm_title in {"", "untitled"}
+    if weak_title and len(body) < 400:
         return True
     return False
+
+
+def _extract_pieces(html: str) -> tuple[str | None, str | None, str | None]:
+    """Run trafilatura.extract + extract_metadata once on a downloaded HTML
+    blob. Returns (markdown_text, title, author) — any may be None.
+    """
+    text = trafilatura.extract(
+        html,
+        output_format="markdown",
+        include_links=True,
+        include_images=True,
+        include_tables=True,
+    )
+    metadata = trafilatura.extract_metadata(html)
+    title = metadata.title if metadata and metadata.title else None
+    author = metadata.author if metadata and metadata.author else None
+    return text, title, author
 
 
 def extract_article(url: str) -> CapturedContent:
@@ -198,52 +243,44 @@ def extract_article(url: str) -> CapturedContent:
     if not downloaded:
         raise ValueError(f"Failed to fetch URL: {url}")
 
-    # Extract main text as markdown
-    text = trafilatura.extract(
-        downloaded,
-        output_format="markdown",
-        include_links=True,
-        include_images=True,
-        include_tables=True,
-    )
+    text, title, author = _extract_pieces(downloaded)
 
-    # If extraction came up empty or trivially short, the direct fetch may
-    # have been served a block / captcha / cookie wall page. Retry through
-    # the residential proxy and re-extract.
-    if (not text or len(text.strip()) < 200):
+    # Retry through the residential proxy if the direct fetch came back empty,
+    # trivially short, OR looking like a wall/challenge page. The proxy uses
+    # a residential IP and often gets the real content where the datacenter
+    # IP gets fronted by Cloudflare/captcha/etc.
+    needs_retry = (
+        not text
+        or len(text.strip()) < 200
+        or _looks_like_challenge(text, title, downloaded)
+    )
+    if needs_retry:
         retry_html = _fetch_via_proxy(url)
         if retry_html:
-            retry_text = trafilatura.extract(
-                retry_html,
-                output_format="markdown",
-                include_links=True,
-                include_images=True,
-                include_tables=True,
+            r_text, r_title, r_author = _extract_pieces(retry_html)
+            retry_is_better = (
+                r_text
+                and not _looks_like_challenge(r_text, r_title, retry_html)
+                and len(r_text.strip()) > len((text or "").strip())
             )
-            if retry_text and len(retry_text.strip()) > len((text or "").strip()):
+            if retry_is_better:
                 logger.info("extract via proxy improved content for %s", url)
-                downloaded = retry_html
-                text = retry_text
+                downloaded, text, title, author = retry_html, r_text, r_title, r_author
 
     if not text:
         raise ValueError(f"Failed to extract content from: {url}")
 
-    # Extract metadata up front so we can use the title in the challenge check.
-    metadata = trafilatura.extract_metadata(downloaded)
-    title = metadata.title if metadata and metadata.title else None
-
-    if _looks_like_challenge(text, title):
+    if _looks_like_challenge(text, title, downloaded):
         raise ValueError(
-            f"Anti-bot challenge served for {url} — site requires "
-            f"interactive verification, capture aborted."
+            f"Anti-bot wall served for {url} — short body / generic title / "
+            f"captcha-widget HTML. Capture aborted; try again later or via "
+            f"a different network."
         )
 
     # Clean up empty image tags and table artifacts
     text = re.sub(r"!\[\]\(\)\s*\|?\s*", "", text)
     text = re.sub(r"^\|?\s*\n", "", text, flags=re.MULTILINE)
     text = text.lstrip("\n")
-
-    author = metadata.author if metadata else None
 
     return CapturedContent(
         url=url,
