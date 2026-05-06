@@ -14,6 +14,7 @@ from ampersand_core.store import frontmatter, hashing, paths
 from ampersand_core.store.errors import Conflict, NotFound, StoreError
 from ampersand_core.store.events import ChangeEvent, ChangeKind, OnChangeHook
 from ampersand_core.store.ids import is_valid, new_id
+from ampersand_core.store.meta_index import MetaIndex, row_to_kwargs
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _RESERVED_KEYS = {"id", "captured", "updated", "content_hash"}
@@ -150,6 +151,8 @@ class MarkdownStore:
         paths.docs_root(self.root).mkdir(parents=True, exist_ok=True)
         paths.index_root(self.root).mkdir(parents=True, exist_ok=True)
         self._on_change = on_change
+        self._meta_index = MetaIndex(paths.meta_index_path(self.root))
+        self._bootstrap_meta_index_if_needed()
 
     # ── writes ──────────────────────────────────────────────────────
 
@@ -252,6 +255,7 @@ class MarkdownStore:
             target.unlink()
         except FileNotFoundError:
             pass
+        self._meta_index.delete(doc_id)
         self._fire(
             ChangeKind.DELETED,
             existing.meta,
@@ -279,33 +283,38 @@ class MarkdownStore:
         cursor: str | None = None,
         limit: int = 100,
     ) -> ListPage:
-        all_meta = sorted(
-            self.iter_all(),
-            key=lambda m: (m.updated_at, m.id),
-            reverse=True,
-        )
-        if since is not None:
-            since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
-            all_meta = [m for m in all_meta if m.updated_at >= since_utc]
-
-        start = 0
+        cursor_dt: datetime | None = None
+        cursor_id: str | None = None
         if cursor:
             try:
                 decoded = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
                 cur_iso, cur_id = decoded.split("|", 1)
-                cur_dt = _parse_iso(cur_iso)
+                cursor_dt = _parse_iso(cur_iso)
+                cursor_id = cur_id
             except Exception as exc:
                 raise StoreError(f"invalid cursor: {cursor!r}") from exc
-            for i, m in enumerate(all_meta):
-                if (m.updated_at, m.id) < (cur_dt, cur_id):
-                    start = i
-                    break
-            else:
-                start = len(all_meta)
 
-        page_items = all_meta[start : start + limit]
+        if since is not None:
+            since_utc = (
+                since.astimezone(timezone.utc)
+                if since.tzinfo
+                else since.replace(tzinfo=timezone.utc)
+            )
+        else:
+            since_utc = None
+
+        # Fetch limit+1 to detect "has more" without a separate count.
+        rows = self._meta_index.list_rows(
+            since=since_utc,
+            cursor_updated_at=cursor_dt,
+            cursor_id=cursor_id,
+            limit=limit + 1,
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        page_items = [DocMeta(**row_to_kwargs(r)) for r in rows]
         next_cursor: str | None = None
-        if len(all_meta) > start + limit and page_items:
+        if has_more and page_items:
             last = page_items[-1]
             raw = f"{_iso(last.updated_at)}|{last.id}".encode("utf-8")
             next_cursor = base64.urlsafe_b64encode(raw).decode("ascii")
@@ -351,10 +360,9 @@ class MarkdownStore:
         fm["content_hash"] = h
         final_bytes = frontmatter.dump(fm, body).encode("utf-8")
         _atomic_write(target, final_bytes)
-        return VaultDoc(
-            meta=_meta_from_frontmatter(fm, rel_path),
-            body=body,
-        )
+        meta = _meta_from_frontmatter(fm, rel_path)
+        self._meta_index.upsert(meta)
+        return VaultDoc(meta=meta, body=body)
 
     def _read(self, path: Path, rel_path: str) -> VaultDoc:
         text = path.read_text(encoding="utf-8")
@@ -365,6 +373,30 @@ class MarkdownStore:
         idx = paths.index_path(self.root, doc_id)
         idx.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(idx, rel_path.encode("utf-8"))
+
+    def _bootstrap_meta_index_if_needed(self) -> int:
+        """Backfill meta_index from .md files when the sidecar is empty.
+
+        Runs at most once per fresh deploy: after that every write keeps the
+        index in sync. External edits captured by `vault_watcher.py` keep it
+        current. If both stays empty, no-op.
+        """
+        if not self._meta_index.is_empty():
+            return 0
+        count = 0
+        for meta in self.iter_all():
+            self._meta_index.upsert(meta)
+            count += 1
+        return count
+
+    def rebuild_meta_index(self) -> int:
+        """Drop and rebuild the metadata sidecar from .md files. Admin op."""
+        self._meta_index.reset()
+        count = 0
+        for meta in self.iter_all():
+            self._meta_index.upsert(meta)
+            count += 1
+        return count
 
     def _fire(
         self,

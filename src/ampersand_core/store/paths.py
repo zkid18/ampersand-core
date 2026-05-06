@@ -9,6 +9,7 @@ from ampersand_core.converter import slug_filename
 
 DOCS_DIR = "docs"
 INDEX_DIR = ".store/by-id"
+META_INDEX_FILE = ".store/meta.db"
 
 
 def docs_root(root: Path) -> Path:
@@ -17,6 +18,10 @@ def docs_root(root: Path) -> Path:
 
 def index_root(root: Path) -> Path:
     return root / INDEX_DIR
+
+
+def meta_index_path(root: Path) -> Path:
+    return root / META_INDEX_FILE
 
 
 def doc_path(root: Path, doc_id: str, when: datetime, title: str | None) -> Path:
