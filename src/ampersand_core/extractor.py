@@ -54,12 +54,44 @@ def is_linkedin_url(url: str) -> bool:
     return any(p.search(url) for p in _LINKEDIN_VIDEO_PATTERNS)
 
 
+def _playwright_proxy_kwargs() -> dict | None:
+    """Translate AMPERSAND_HTTP_PROXY (user:pass@host:port URL) into the
+    shape playwright expects for chromium.launch(proxy=...). None if no
+    proxy is configured.
+    """
+    from urllib.parse import urlparse
+
+    raw = get_proxy()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if not parsed.hostname or not parsed.port:
+        return None
+    kwargs: dict = {"server": f"{parsed.scheme or 'http'}://{parsed.hostname}:{parsed.port}"}
+    if parsed.username:
+        kwargs["username"] = parsed.username
+    if parsed.password:
+        kwargs["password"] = parsed.password
+    return kwargs
+
+
 def _fetch_with_playwright(url: str) -> str:
-    """Fetch a page using a headless Chromium browser (JS-rendered)."""
+    """Fetch a page using a headless Chromium browser (JS-rendered).
+
+    Routes through the residential proxy if one is configured — JS-heavy
+    sites often also enforce per-ASN blocks, and a datacenter Chromium hit
+    fails the same way trafilatura would.
+    """
     from playwright.sync_api import sync_playwright
 
+    launch_kwargs: dict = {"headless": True}
+    proxy_kwargs = _playwright_proxy_kwargs()
+    if proxy_kwargs:
+        launch_kwargs["proxy"] = proxy_kwargs
+        logger.info("playwright launching with proxy=%s", proxy_kwargs["server"])
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(**launch_kwargs)
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         # Give JS a moment to render dynamic content
