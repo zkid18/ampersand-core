@@ -237,6 +237,47 @@ def _extract_pieces(html: str) -> tuple[str | None, str | None, str | None]:
     return text, title, author
 
 
+def extract_article_from_html(
+    url: str, html: str, *, fallback_title: str | None = None
+) -> CapturedContent:
+    """Run the article extraction pipeline on caller-supplied HTML.
+
+    Used by /capture/html (browser-extension clipper) where the user's
+    authenticated browser session has already fetched the page; we don't
+    want to refetch from the server. Skips fetch tiers and the proxy
+    retry — the caller already got the real page. Challenge detection
+    still applies (the HTML may include a captcha widget if the page is
+    a paywall stub).
+    """
+    if not html or not html.strip():
+        raise ValueError(f"Empty HTML for {url}")
+
+    text, title, author = _extract_pieces(html)
+    if not text:
+        raise ValueError(f"Failed to extract content from supplied HTML for: {url}")
+
+    if not title:
+        title = fallback_title
+
+    if _looks_like_challenge(text, title, html):
+        raise ValueError(
+            f"Supplied HTML for {url} looks like a wall/challenge page; "
+            f"capture aborted."
+        )
+
+    text = re.sub(r"!\[\]\(\)\s*\|?\s*", "", text)
+    text = re.sub(r"^\|?\s*\n", "", text, flags=re.MULTILINE)
+    text = text.lstrip("\n")
+
+    return CapturedContent(
+        url=url,
+        title=title or "Untitled",
+        content_markdown=text,
+        content_type=ContentType.ARTICLE,
+        author=author,
+    )
+
+
 def extract_article(url: str) -> CapturedContent:
     """Fetch a URL and extract its article content as markdown."""
     downloaded = _fetch_url(url)
