@@ -20,6 +20,8 @@ dependencies = [
     "python-ulid>=2.0",
     "youtube-transcript-api>=1.0",
     "html-to-markdown>=3.0",
+    "sqlite-vec>=0.1.6",
+    "openai>=1.50",
 ]
 
 [project.optional-dependencies]
