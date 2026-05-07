@@ -13,7 +13,9 @@ info we got. yt-dlp is no longer used; YouTube blocks it on cloud IPs with
 
 from __future__ import annotations
 
+import html as _htmllib
 import os
+import re
 import urllib.parse
 
 import httpx
@@ -99,6 +101,72 @@ def extract_youtube(url: str) -> CapturedContent:
         content_type=ContentType.VIDEO,
         author=channel,
     )
+
+
+def youtube_stub_from_html(
+    url: str,
+    page_html: str,
+    fallback: YouTubeTranscriptUnavailable | None = None,
+) -> CapturedContent:
+    """Build a YouTube CapturedContent from caller-supplied watch-page HTML.
+
+    For the clipper path when no transcript is available. trafilatura
+    extracts the page chrome (sidebar, comments) on YouTube — not useful.
+    Instead, pull the canonical bits straight from <meta property="og:*">
+    which YouTube reliably sets server-side. Falls back to whatever
+    metadata oembed already gave us (carried on the exception).
+    """
+    title = _meta_content(page_html, "og:title") or (fallback.title if fallback else None) or "Untitled Video"
+    description = _meta_content(page_html, "og:description") or _meta_content(page_html, "description") or ""
+    channel = (fallback.channel if fallback else None) or "Unknown"
+    channel_url = fallback.channel_url if fallback else None
+
+    lines: list[str] = [f"**Channel**: {channel}"]
+    if channel_url:
+        lines.append(f"**Channel URL**: {channel_url}")
+    lines.append("")
+    lines.append("*Transcript unavailable for this video.*")
+    if description.strip():
+        lines.append("")
+        lines.append("## Description")
+        lines.append("")
+        lines.append(description.strip())
+
+    return CapturedContent(
+        url=url,
+        title=title,
+        content_markdown="\n".join(lines),
+        content_type=ContentType.VIDEO,
+        author=channel,
+    )
+
+
+def _meta_content(html: str, name: str) -> str | None:
+    """Extract the content of a <meta name|property="X"> tag. None if absent.
+
+    Hand-rolled rather than via BeautifulSoup to avoid pulling in another
+    dep just for two attributes. Quote handling: capture group [^Q]+ uses
+    backreference \\1 to the opening quote so apostrophes inside a
+    double-quoted value (and vice-versa) don't truncate the match.
+    """
+    if not html:
+        return None
+    n = re.escape(name)
+    patterns = (
+        # <meta property="X" content="Y">
+        rf'<meta\b[^>]*?\b(?:property|name)\s*=\s*(["\']){n}\1[^>]*?\bcontent\s*=\s*(["\'])(.*?)\2',
+        # <meta content="Y" property="X">  (attribute order reversed)
+        rf'<meta\b[^>]*?\bcontent\s*=\s*(["\'])(.*?)\1[^>]*?\b(?:property|name)\s*=\s*(["\']){n}\3',
+    )
+    for pattern in patterns:
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            # Group index of the captured content varies per pattern.
+            # First pattern: groups (open_q, close_q, content) → index 3.
+            # Second pattern: groups (open_q, content, close_q) → index 2.
+            value = m.group(3) if pattern is patterns[0] else m.group(2)
+            return _htmllib.unescape(value)
+    return None
 
 
 def _video_id(url: str) -> str | None:
