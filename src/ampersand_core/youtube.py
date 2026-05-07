@@ -31,44 +31,66 @@ TRANSCRIPT_LANGS = ["en", "ru", "es", "pt", "fr", "de"]
 PROXY_ENV = "AMPERSAND_YOUTUBE_PROXY"
 
 
+class YouTubeTranscriptUnavailable(ValueError):
+    """Raised when no usable transcript could be fetched for a YouTube URL.
+
+    Carries the partial metadata we did fetch (title, channel) so callers
+    can still construct a stub if they choose. Used by the server's
+    /capture/html dispatch to fall back to caller-supplied HTML — most
+    YouTube watch pages render the description into the DOM, which is
+    still useful even without a transcript.
+    """
+
+    def __init__(self, message: str, *, title: str, channel: str, channel_url: str | None) -> None:
+        super().__init__(message)
+        self.title = title
+        self.channel = channel
+        self.channel_url = channel_url
+
+
 def _proxy_url() -> str | None:
     raw = os.environ.get(PROXY_ENV, "").strip()
     return raw or None
 
 
 def extract_youtube(url: str) -> CapturedContent:
-    """Extract transcript + metadata from a YouTube URL."""
+    """Extract transcript + metadata from a YouTube URL.
+
+    Raises YouTubeTranscriptUnavailable when no transcript could be fetched
+    — saving a stub doc that just says "no transcript" is worse than
+    failing, since callers can choose a richer fallback (page HTML).
+    """
     video_id = _video_id(url) or ""
     meta = _oembed(url)
 
     title = meta.get("title") or "Untitled Video"
     channel = meta.get("author_name") or "Unknown"
+    channel_url = meta.get("author_url")
 
     transcript, transcript_lang, transcript_err = _transcript(video_id)
 
-    lines: list[str] = [f"**Channel**: {channel}"]
-    if meta.get("author_url"):
-        lines.append(f"**Channel URL**: {meta['author_url']}")
-    lines.append("")
+    if not transcript:
+        reason = (
+            "YouTube blocked this server's IP" if transcript_err == "ip_blocked"
+            else "captions disabled or no track in our languages"
+        )
+        raise YouTubeTranscriptUnavailable(
+            f"No transcript for {url} — {reason}",
+            title=title,
+            channel=channel,
+            channel_url=channel_url,
+        )
 
-    if transcript:
-        if transcript_lang:
-            lines.append(f"## Transcript ({transcript_lang})")
-        else:
-            lines.append("## Transcript")
-        lines.append("")
-        lines.append(transcript)
-    elif transcript_err == "ip_blocked":
-        lines.append(
-            "*Transcript unavailable — YouTube blocked this server's IP "
-            "(typical for cloud-provider IPs). To get transcripts, route "
-            "this fetch through a residential IP or use a proxy.*"
-        )
+    lines: list[str] = [f"**Channel**: {channel}"]
+    if channel_url:
+        lines.append(f"**Channel URL**: {channel_url}")
+    lines.append("")
+    if transcript_lang:
+        lines.append(f"## Transcript ({transcript_lang})")
     else:
-        lines.append(
-            "*No transcript available — captions may be disabled for this "
-            "video, or no caption track exists in the languages we tried.*"
-        )
+        lines.append("## Transcript")
+    lines.append("")
+    lines.append(transcript)
 
     return CapturedContent(
         url=url,
