@@ -25,7 +25,7 @@ from ampersand_core.search.models import Section, SearchResult
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # bumped from 1: dim 1536 → 512 (Matryoshka)
 
 
 def _sqlite_with_extensions():
@@ -220,6 +220,36 @@ class VectorIndex:
         return self._conn.execute(
             "SELECT COUNT(*) FROM vec_section_meta"
         ).fetchone()[0]
+
+    def doc_centroid(self, doc_id: str) -> list[float] | None:
+        """Mean of all section embeddings for a doc, L2-normalized.
+
+        Used by the "find related" endpoint as a single-vector summary
+        of the whole doc. Returns None if the doc has no sections in the
+        index (e.g. failed to embed).
+        """
+        rows = self._conn.execute(
+            "SELECT v.embedding FROM vec_sections v"
+            " JOIN vec_section_meta m ON m.rowid = v.rowid"
+            " WHERE m.doc_id = ?",
+            (doc_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        # Unpack each blob, sum, divide.
+        n = EMBED_DIM
+        accum = [0.0] * n
+        for (blob,) in rows:
+            vec = struct.unpack(f"{n}f", blob)
+            for i in range(n):
+                accum[i] += vec[i]
+        count = len(rows)
+        mean = [x / count for x in accum]
+        # L2-normalize so cosine-style MATCH behaves consistently.
+        norm = sum(x * x for x in mean) ** 0.5
+        if norm == 0:
+            return mean
+        return [x / norm for x in mean]
 
     def search(self, query_embedding: list[float], *, limit: int = 20) -> list[SearchResult]:
         if not 1 <= limit <= 1000:
