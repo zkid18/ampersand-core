@@ -207,8 +207,11 @@ def _build_match(query: str, mode: str) -> str:
         # `"phrase"`, `prefix*`, etc.
         return query
 
-    # Tokenize once for "any" and "substring" modes.
-    raw_tokens = [t for t in query.split() if t.strip()]
+    # Tokenize on whitespace AND on hyphens. FTS5 treats `-` as NOT and
+    # `:` as column-scope, so a token like "go-to-market" gets parsed as
+    # `go - to:market` and 400s. Splitting on the dash up front lets each
+    # chunk become its own bare token, which matches user intent anyway.
+    raw_tokens = [t for t in re.split(r"[\s\-‐-―]+", query) if t.strip()]
     cleaned: list[str] = []
     for raw in raw_tokens:
         c = _FTS_OPERATOR_RE.sub(" ", raw).strip()
