@@ -14,6 +14,7 @@ info we got. yt-dlp is no longer used; YouTube blocks it on cloud IPs with
 from __future__ import annotations
 
 import html as _htmllib
+import logging
 import os
 import re
 import urllib.parse
@@ -21,6 +22,8 @@ import urllib.parse
 import httpx
 
 from ampersand_core.models import CapturedContent, ContentType
+
+logger = logging.getLogger(__name__)
 
 OEMBED_TIMEOUT = 10
 OEMBED_URL = "https://www.youtube.com/oembed"
@@ -70,6 +73,30 @@ def extract_youtube(url: str) -> CapturedContent:
     channel_url = meta.get("author_url")
 
     transcript, transcript_lang, transcript_err = _transcript(video_id)
+
+    if not transcript:
+        # Audio-fallback: download the audio track and run it through
+        # Whisper. Off by default (it costs real money per video).
+        # Enable with AMPERSAND_YOUTUBE_AUDIO_FALLBACK=1.
+        from ampersand_core.audio import (
+            AudioError,
+            transcribe_youtube,
+            youtube_audio_fallback_enabled,
+        )
+
+        if youtube_audio_fallback_enabled():
+            try:
+                fallback = transcribe_youtube(url, proxy=_proxy_url())
+                transcript = fallback.text
+                transcript_lang = "audio"
+                logger.info(
+                    "audio fallback succeeded for %s (%d chars from %d-byte mp3)",
+                    url, len(transcript), fallback.audio_bytes,
+                )
+            except AudioError as exc:
+                logger.warning("audio fallback failed for %s: %s", url, exc)
+            except Exception:  # noqa: BLE001
+                logger.exception("audio fallback crashed for %s", url)
 
     if not transcript:
         reason = (
