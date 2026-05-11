@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ampersand-core"
-version = "0.1.0"
-description = "Extraction engine — turns URLs, emails, and feeds into clean markdown."
+version = "0.2.0"
+description = "Ampersand engine — extraction, storage, search, and the HTTP server."
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
@@ -22,6 +22,10 @@ dependencies = [
     "html-to-markdown>=3.0",
     "sqlite-vec>=0.1.6",
     "openai>=1.50",
+    "tiktoken>=0.7",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "typer>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +35,9 @@ dev = [
     "pytest-httpx>=0.30",
     "faster-whisper>=1.0",
 ]
+
+[project.scripts]
+ampersand-admin = "ampersand_core.server.admin_cli.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ampersand_core"]

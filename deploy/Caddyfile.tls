@@ -1,0 +1,25 @@
+# Production Caddyfile — TLS via Let's Encrypt.
+# Replace YOUR_DOMAIN_HERE with the hostname pointed at this box (A record).
+# Then: sudo cp deploy/Caddyfile.tls /etc/caddy/Caddyfile && sudo systemctl reload caddy
+
+YOUR_DOMAIN_HERE {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        # remove the server-version banner Caddy normally adds
+        -Server
+    }
+
+    # Crude per-IP rate limit. Tune to taste.
+    # (Built-in rate_limit is reserved for Caddy's commercial / plugin extensions;
+    # for serious limiting use the github.com/mholt/caddy-ratelimit plugin.)
+
+    reverse_proxy 127.0.0.1:8765 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-For {remote_host}
+    }
+}

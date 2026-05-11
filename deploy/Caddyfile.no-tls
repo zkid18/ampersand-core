@@ -1,0 +1,12 @@
+# DANGER — HTTP only, raw IP, no TLS.
+#
+# Use this Caddyfile ONLY for proving the deploy works end-to-end before you
+# attach a domain. Bearer tokens travel in the clear. Anyone who passively
+# observes the network path can steal your API key. Move to Caddyfile.tls
+# the moment you have a domain pointed at the box.
+
+:80 {
+    encode gzip zstd
+    header -Server
+    reverse_proxy 127.0.0.1:8765
+}

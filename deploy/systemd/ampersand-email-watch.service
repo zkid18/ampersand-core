@@ -1,0 +1,30 @@
+[Unit]
+Description=Ampersand IMAP email watcher (newsletters → vault)
+After=network-online.target ampersand-server.service
+Wants=network-online.target
+Requires=ampersand-server.service
+
+[Service]
+Type=simple
+User=ampersand
+Group=ampersand
+WorkingDirectory=/var/lib/ampersand
+EnvironmentFile=/etc/ampersand/env
+ExecStart=/opt/ampersand/venv/bin/ampersand email watch
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (matches ampersand-server.service profile)
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/ampersand
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Ampersand feed sync every 30 minutes
+Requires=ampersand-feed-sync.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Unit=ampersand-feed-sync.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

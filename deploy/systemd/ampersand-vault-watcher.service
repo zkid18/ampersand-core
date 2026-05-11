@@ -1,0 +1,29 @@
+[Unit]
+Description=Ampersand vault watcher (keeps FTS5 + by-id index in sync with direct file edits)
+After=network-online.target ampersand-server.service
+Wants=network-online.target
+Requires=ampersand-server.service
+
+[Service]
+Type=simple
+User=ampersand
+Group=ampersand
+WorkingDirectory=/var/lib/ampersand
+EnvironmentFile=/etc/ampersand/env
+ExecStart=/opt/ampersand/venv/bin/python3 /opt/ampersand/ampersand-core/scripts/vault_watcher.py /var/lib/ampersand/vault
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/ampersand
+
+[Install]
+WantedBy=multi-user.target
