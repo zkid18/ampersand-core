@@ -8,7 +8,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 
-from ampersand_core.search import SearchError, SearchIndexer, SearchResult, VectorIndexer
+from ampersand_core.search import (
+    SearchError,
+    SearchIndexer,
+    SearchResult,
+    VectorIndexer,
+    parse_sections,
+    rerank_enabled,
+    rerank_with_llm,
+)
 from ampersand_core.store import (
     Conflict,
     DocMeta,
@@ -73,6 +81,34 @@ def _indexer_dep() -> SearchIndexer:
 
 def _vec_indexer_dep() -> VectorIndexer | None:
     return get_vec_indexer()
+
+
+def _make_body_lookup(store: MarkdownStore):
+    """Build a memoized (doc_id, section_path) → body fetcher for rerank.
+
+    Re-rank passes ~30 candidates and many often share the same source
+    doc — caching the parsed section list per-doc within a single request
+    avoids re-reading and re-parsing the same markdown N times.
+
+    Falls back to the empty string on NotFound or any extraction failure,
+    which `rerank_with_llm` then substitutes with the candidate's snippet.
+    """
+    doc_cache: dict[str, dict[tuple, str]] = {}
+
+    def lookup(c: SearchResult) -> str:
+        section_map = doc_cache.get(c.doc_id)
+        if section_map is None:
+            try:
+                doc = store.get(c.doc_id)
+            except NotFound:
+                doc_cache[c.doc_id] = {}
+                return ""
+            sections = parse_sections(doc.body, doc_title=doc.meta.title)
+            section_map = {tuple(s.path): s.body for s in sections}
+            doc_cache[c.doc_id] = section_map
+        return section_map.get(tuple(c.section_path), "")
+
+    return lookup
 
 
 def _rrf_fuse(
@@ -248,20 +284,44 @@ def search_semantic(
 @router.post("/search/hybrid", response_model=SearchResponse)
 def search_hybrid(
     payload: HybridSearchRequest,
+    store: Annotated[MarkdownStore, Depends(_store_dep)],
     indexer: Annotated[SearchIndexer, Depends(_indexer_dep)],
     vec: Annotated[VectorIndexer | None, Depends(_vec_indexer_dep)],
 ) -> SearchResponse:
-    """Reciprocal rank fusion of FTS BM25 + vector KNN. Falls back to
-    BM25-only when the vector index isn't populated (200, not 503)."""
+    """Reciprocal rank fusion of FTS BM25 + vector KNN, with optional LLM
+    re-rank as a final precision stage.
+
+    Falls back to BM25-only when the vector index isn't populated (200,
+    not 503). When `rerank=True` the candidate pool is widened to ~4×
+    `limit`, fused, then graded by gpt-4o-mini and re-sorted by relevance.
+    """
     if vec is None:
         results = indexer.index.search(payload.q, limit=payload.limit, mode="any")
-    else:
-        fts_hits = indexer.index.search(
-            payload.q, limit=max(payload.limit * 3, 30), mode="any",
+        return SearchResponse(results=_to_hits(results))
+
+    use_rerank = bool(payload.rerank) and rerank_enabled()
+    # When rerank is on, fetch a fatter candidate pool so the LLM has more
+    # options to reorder. ~4× limit (capped to 60) is a reasonable trade
+    # between coverage and prompt size.
+    pool_size = (
+        max(payload.limit * 4, 30) if use_rerank else max(payload.limit * 3, 30)
+    )
+    pool_size = min(pool_size, 60)
+
+    fts_hits = indexer.index.search(payload.q, limit=pool_size, mode="any")
+    qvec = vec._embedder.embed(payload.q)
+    vec_hits = vec.index.search(qvec, limit=pool_size)
+    fused = _rrf_fuse(fts_hits, vec_hits, limit=pool_size)
+
+    if use_rerank:
+        results = rerank_with_llm(
+            payload.q,
+            fused,
+            body_lookup=_make_body_lookup(store),
+            limit=payload.limit,
         )
-        qvec = vec._embedder.embed(payload.q)
-        vec_hits = vec.index.search(qvec, limit=max(payload.limit * 3, 30))
-        results = _rrf_fuse(fts_hits, vec_hits, limit=payload.limit)
+    else:
+        results = fused[:payload.limit]
     return SearchResponse(results=_to_hits(results))
 
 

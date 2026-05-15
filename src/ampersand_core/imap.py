@@ -11,7 +11,51 @@ from typing import Callable, Generator
 from ampersand_core.email_parser import extract_from_message, parse_raw_to_message
 from ampersand_core.models import CapturedContent
 
+# Python's imaplib defaults _MAXLINE to 1MB which is fine for tiny INBOXes but
+# blows up on a long-running Gmail account where `SEARCH UNSEEN` can return
+# hundreds of thousands of UIDs on a single line. 10MB covers ~1M UIDs.
+imaplib._MAXLINE = 10 * 1024 * 1024
+
 logger = logging.getLogger(__name__)
+
+
+def _build_search_criterion(config: dict) -> str:
+    """Compose the IMAP SEARCH expression from per-account config.
+
+    Recognized keys (all optional, in addition to the literal escape hatch):
+      - `since`: ISO date or `dd-Mmm-YYYY`. Restricts to messages newer
+                 than this — critical on mailboxes with huge unread backlogs
+                 (`raveforlive@gmail.com` had a >1MB SEARCH response).
+      - `search_criterion`: raw IMAP expression, used as-is if set.
+
+    Default is plain `UNSEEN` when nothing is configured.
+    """
+    raw = config.get("search_criterion")
+    if raw:
+        return raw
+    parts = ["UNSEEN"]
+    since = config.get("since")
+    if since:
+        parts.append(f'SINCE "{_imap_date(since)}"')
+    if len(parts) == 1:
+        return parts[0]
+    return "(" + " ".join(parts) + ")"
+
+
+def _imap_date(value: str) -> str:
+    """Normalize a date string to IMAP's `dd-Mmm-YYYY` format.
+
+    Accepts ISO `YYYY-MM-DD` (the easy thing for users to type into JSON)
+    and the native `dd-Mmm-YYYY`. Anything else is returned verbatim so a
+    typo surfaces as an IMAP server error rather than getting silently
+    rewritten.
+    """
+    import datetime as _dt
+    try:
+        d = _dt.date.fromisoformat(value)
+        return d.strftime("%d-%b-%Y")
+    except ValueError:
+        return value
 
 
 def _connect(config: dict) -> imaplib.IMAP4_SSL:
@@ -26,16 +70,21 @@ def fetch_unseen(
     config: dict,
     email_filter: Callable[[EmailMessage], bool] | None = None,
     batch_size: int = 50,
+    search_criterion: str | None = None,
 ) -> Generator[tuple[bytes, CapturedContent], None, None]:
-    """Fetch all unseen emails and parse them. Yields (uid, content) pairs.
+    """Fetch emails matching *search_criterion* and parse them. Yields (uid, content) pairs.
 
     Processes emails in batches with automatic reconnection on failure.
     If *email_filter* is provided, only emails where the callback returns True
-    are yielded.
+    are yielded. When *search_criterion* is None the SEARCH is built from
+    the per-account config (`since`, `search_criterion` keys) and falls
+    back to plain UNSEEN.
     """
+    if search_criterion is None:
+        search_criterion = _build_search_criterion(config)
     conn = _connect(config)
     try:
-        _, msg_ids = conn.search(None, "UNSEEN")
+        _, msg_ids = conn.search(None, search_criterion)
         if not msg_ids[0]:
             return
         uids = msg_ids[0].split()
@@ -195,7 +244,7 @@ def _process_unseen(
     email_filter: Callable[[EmailMessage], bool] | None = None,
 ) -> None:
     """Fetch and process all unseen emails on an existing connection."""
-    _, msg_ids = conn.search(None, "UNSEEN")
+    _, msg_ids = conn.search(None, _build_search_criterion(config))
     if not msg_ids[0]:
         return
 

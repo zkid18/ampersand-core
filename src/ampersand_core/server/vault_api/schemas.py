@@ -81,3 +81,12 @@ class HybridSearchRequest(BaseModel):
 
     q: str
     limit: int = Field(default=20, ge=1, le=100)
+    rerank: bool = Field(
+        default=False,
+        description=(
+            "Adds an LLM re-rank stage after RRF fusion. Expands the candidate "
+            "pool, asks gpt-4o-mini to score relevance, returns top `limit` by "
+            "LLM judgement. +1-2s latency, ~$0.001/query. Server-wide kill "
+            "switch: AMPERSAND_RERANK_ENABLED=0."
+        ),
+    )
