@@ -22,6 +22,7 @@ from ampersand_core.youtube import (
     youtube_stub_from_html,
 )
 
+from ampersand_core.server.chat_api import router as chat_router
 from ampersand_core.server.feed_api import router as feed_router
 from ampersand_core.server.vault_api import router as vault_router
 from ampersand_core.server.vault_api.auth import require_api_key
@@ -83,6 +84,7 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
 
     app.include_router(vault_router)
     app.include_router(feed_router)
+    app.include_router(chat_router)
     app.include_router(web_router)
     mount_web_static(app)
 
