@@ -160,19 +160,106 @@ A future MCP server (so Claude Desktop / Cursor can call the vault as a native t
 
 ---
 
+## What you'll need (external dependencies & costs)
+
+Ampersand is mostly self-contained Python + SQLite, but a few features lean on outside services. Some are required, some are optional — here's the honest breakdown.
+
+### Required to capture + run FTS search
+
+| Thing | Why | Cost | Notes |
+|---|---|---|---|
+| **Python 3.10+** | runtime | free | nothing exotic |
+| **SQLite with `load_extension` enabled** | `sqlite-vec` needs it for vectors | free | Linux distros + Homebrew Python ship it on. **macOS python.org Python ships it OFF** — use `brew install python` if you're on Mac. |
+| **A box to run it on** | hosting | $6/mo (DO droplet) / free (Raspberry Pi / laptop / NAS) | Personal box is fine. The deploy docs assume a 1 GB DigitalOcean droplet. |
+
+### Required for semantic search, chat, and audio fallback
+
+| Thing | Why | Cost | What breaks if you skip it |
+|---|---|---|---|
+| **OpenAI API key** | embeddings (`text-embedding-3-small`), chat (`gpt-4o-mini`), Whisper (audio transcription) | ~$0.40 to embed 6,800 docs once. Then pennies/day for new captures. ~$0.001 per chat query. ~$0.006/min of Whisper. | `mode=semantic` / `mode=hybrid` / `rerank=true` / `POST /chat` / no-caption YouTube fallback all become unavailable. **BM25 search still works.** |
+
+> If you want a local-models alternative (BGE / Nomic via llama.cpp) instead of OpenAI, it's on the roadmap but not built yet. PR welcome.
+
+### Strongly recommended if you'll capture YouTube or anti-bot sites
+
+| Thing | Why | Cost | What breaks if you skip it |
+|---|---|---|---|
+| **Residential proxy** ([Webshare](https://www.webshare.io) is what I use; Bright Data / IPRoyal / your own Squid all work) | Google rate-limits cloud IPs on the YouTube transcript API; Cloudflare and Russian news sites do similar | $25-50/mo for a residential plan | YouTube captures fail intermittently from cloud IPs. JS-heavy / Cloudflare-walled sites return challenge pages. **From your home IP this is usually not a problem.** Set `AMPERSAND_HTTP_PROXY=http://user:pass@host:port` to enable. |
+
+### Optional, surface-specific
+
+| If you want… | You also need… | Cost |
+|---|---|---|
+| Telegram bot | A bot token from [@BotFather](https://t.me/BotFather). Free. | free |
+| Email watcher | An IMAP-capable mail account + an **app password** (Gmail/Yahoo require 2FA first) | free |
+| Browser extension (Chrome MV3 clipper) | A Chrome / Brave / Edge with Developer Mode on | free |
+| Notebook chat UI | The OpenAI key above (for `/chat`) | covered above |
+| TLS + domain (instead of HTTP-on-IP) | A domain, an A-record, the bundled Caddyfile | $10-20/yr for the domain |
+
+### Total cost: a personal deployment, all-in
+
+- **Bare minimum (FTS only, no proxy, your laptop)**: $0
+- **Recommended (droplet + OpenAI + proxy)**: ~$30-60/mo. Most of that is the residential proxy.
+- **Without the proxy** (you accept YouTube intermittently fails): ~$10-15/mo.
+
+---
+
 ## Install
 
+### 1. Generate the API key
+
+Every request needs `Authorization: Bearer <AMPERSAND_API_KEY>`. There's no signup / dashboard — you generate it yourself.
+
 ```bash
-# Local: capture from your terminal, send to a remote vault server
+openssl rand -hex 32
+# example output:
+# 9b0d3b...f8f9    ← save this; you'll paste it as AMPERSAND_API_KEY
+```
+
+That's it — it's just a 64-char hex string used as a shared secret. **The bootstrap script does this for you** if you run it (see step 3). To rotate later: `ampersand-admin rotate-key --env-file /etc/ampersand/env`.
+
+### 2. Local-only client (talk to a vault server somewhere else)
+
+```bash
 git clone https://github.com/zkid18/ampersand-core
 cd ampersand-core
 uv venv && uv pip install -e .
-export AMPERSAND_BASE_URL=https://your-vault-server
-export AMPERSAND_API_KEY=...
+
+export AMPERSAND_BASE_URL=https://your-vault-server      # or http://192.168.x.y:8765 for LAN
+export AMPERSAND_API_KEY=<the 64-char hex from step 1>
 ampersand capture <some-url>
 ```
 
-For a full self-hosted server (vault + FTS + vector + chat) on a $6/mo DigitalOcean droplet, see [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+### 3. Full self-hosted server (vault + FTS + vector + chat)
+
+```bash
+# on your $6/mo droplet (Ubuntu 24.04 fresh)
+git clone https://github.com/zkid18/ampersand-core /opt/ampersand/ampersand-core
+cd /opt/ampersand/ampersand-core
+sudo bash deploy/bootstrap.sh
+# bootstrap will:
+#   - create the `ampersand` system user
+#   - generate AMPERSAND_API_KEY via openssl, write to /etc/ampersand/env (mode 0640)
+#   - install the venv, install the package editable
+#   - install + enable ampersand-server.service
+#   - print the generated key ONCE so you can copy it to your clients
+```
+
+For the rest of the production setup (Caddy reverse proxy, optional email watcher, optional bot), see [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+
+### 4. Connect external dependencies (if you want them)
+
+Append to `/etc/ampersand/env` and `systemctl restart ampersand-server`:
+
+```sh
+OPENAI_API_KEY=sk-proj-...                                # for vector/chat/rerank/Whisper
+AMPERSAND_HTTP_PROXY=http://user:pass@webshare-host:80    # for YouTube + anti-bot
+AMPERSAND_YOUTUBE_AUDIO_FALLBACK=1                        # opt-in to Whisper audio for no-caption videos
+TELEGRAM_BOT_TOKEN=...                                    # for the bot
+BOT_ALLOWED_USER_IDS=12345678                             # comma-sep numeric Telegram IDs allowed to use the bot
+```
+
+> ⚠️ **Single-tenant warning**: `AMPERSAND_API_KEY` is a master key. Anyone holding it can read, capture, and chat against your entire vault. Don't expose the server to the public internet without TLS, and don't share the key. Rotate after any leak (a Telegram bot token in a screenshot, a config posted on Stack Overflow, etc.).
 
 ---
 
