@@ -25,7 +25,7 @@ PROMO_DOMAINS = {
     "shopifyemail.com",
 }
 
-MIN_WORD_COUNT = 200
+MIN_WORD_COUNT = 500
 
 _EMAIL_RE = re.compile(r"<?\s*([^<>\s]+@[^<>\s]+)\s*>?")
 
@@ -58,41 +58,52 @@ def _matches_domain_set(msg: EmailMessage, domains: set[str]) -> bool:
 
 
 def is_newsletter(msg: EmailMessage) -> bool:
-    """Determine whether an email is likely a newsletter.
+    """Determine whether an email is likely a newsletter worth capturing.
 
-    Three layers (pass if ANY matches):
-    1. List-Id header present -> True
-    2. Sender domain matches known newsletter platforms -> True
-       (but exclude promo platforms and noreply@ patterns)
-    3. Text body word count >= MIN_WORD_COUNT -> True
+    The old heuristic was too lax — bare `List-Id` header was enough to pass,
+    which let in every commercial mailing list (real-estate listings, RZD
+    loyalty mailers, cashback promos). All of those set `List-Id` because
+    it's required mailing-list etiquette.
+
+    New rules (pass ONLY if explicit signal):
+    - Promo domain blocklist + noreply@ → always reject.
+    - Known newsletter platform domain → accept (Substack, Beehiiv, etc).
+    - List-Id present **and** substantial text body → accept (catches
+      self-hosted newsletters that don't use a recognized platform).
+    - Anything else → reject. Sender can be added by hand via
+      `ampersand email allow <sender>` if it's something we actually want.
+
+    Pure-word-count fallback removed — Brazilian real-estate listings have
+    >200 words of property descriptions and were sneaking through.
     """
     sender = get_sender_email(msg)
 
-    # Layer 1: List-Id header strongly suggests mailing list / newsletter
-    if msg.get("list-id"):
-        logger.debug("Newsletter detected (List-Id header): %s", sender)
-        return True
-
-    # Layer 2a: Known newsletter platform domains
-    if _matches_domain_set(msg, NEWSLETTER_DOMAINS):
-        logger.debug("Newsletter detected (platform domain): %s", sender)
-        return True
-
-    # Layer 2b: Promo platform exclusion
+    # Hard rejects first — these always lose, regardless of other signals.
     if _matches_domain_set(msg, PROMO_DOMAINS):
         logger.debug("Rejected (promo domain): %s", sender)
         return False
-
-    # Layer 2c: noreply@ pattern — likely transactional, skip
     if sender.startswith("noreply@") or sender.startswith("no-reply@"):
         logger.debug("Rejected (noreply pattern): %s", sender)
         return False
 
-    # Layer 3: Content length fallback
-    text_body = _get_text_body(msg)
-    if text_body and len(text_body.split()) >= MIN_WORD_COUNT:
-        logger.debug("Newsletter detected (word count >= %d): %s", MIN_WORD_COUNT, sender)
+    # Known newsletter platforms — strong signal, accept on its own.
+    if _matches_domain_set(msg, NEWSLETTER_DOMAINS):
+        logger.debug("Newsletter detected (platform domain): %s", sender)
         return True
+
+    # Self-hosted / off-platform newsletters: require List-Id AND
+    # substantial content. Real-estate / loyalty / cashback emails set
+    # List-Id but rarely cross the body-length bar.
+    if msg.get("list-id"):
+        text_body = _get_text_body(msg)
+        if text_body and len(text_body.split()) >= MIN_WORD_COUNT:
+            logger.debug(
+                "Newsletter detected (List-Id + %d+ words): %s",
+                MIN_WORD_COUNT, sender,
+            )
+            return True
+        logger.debug("Rejected (List-Id but body too short): %s", sender)
+        return False
 
     logger.debug("Rejected (no signals matched): %s", sender)
     return False
