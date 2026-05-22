@@ -88,6 +88,15 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
     app.include_router(web_router)
     mount_web_static(app)
 
+    # Root redirect so the bare URL (http://<host>/) lands on the web shell
+    # instead of FastAPI's default `{"detail":"Not Found"}`. Anyone who pastes
+    # just the host into a browser bar should get *something*, not a JSON 404.
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/", include_in_schema=False)
+    def _root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/ui/")
+
     def _dispatch(url: str, *, html: str | None, fallback_title: str | None):
         """Pick the right extractor for a URL.
 
