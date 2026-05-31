@@ -6,6 +6,8 @@ import logging
 import re
 from email.message import EmailMessage
 
+from ampersand_core.newsletter_classifier import predict_keep
+
 logger = logging.getLogger(__name__)
 
 NEWSLETTER_DOMAINS = {
@@ -91,18 +93,26 @@ def is_newsletter(msg: EmailMessage) -> bool:
         logger.debug("Newsletter detected (platform domain): %s", sender)
         return True
 
-    # Self-hosted / off-platform newsletters: require List-Id AND
-    # substantial content. Real-estate / loyalty / cashback emails set
-    # List-Id but rarely cross the body-length bar.
+    # Self-hosted / off-platform newsletters: List-Id is required (rules out
+    # one-off marketing email), then defer to the classifier (TF-IDF + LogReg
+    # trained on LLM-bootstrapped labels). If the classifier isn't available
+    # (no sklearn, missing model), fall back to the word-count heuristic.
     if msg.get("list-id"):
-        text_body = _get_text_body(msg)
+        text_body = _get_text_body(msg) or ""
+        subject = str(msg.get("subject", ""))
+        classifier_says = predict_keep(sender, subject, text_body)
+        if classifier_says is not None:
+            verdict = "KEEP" if classifier_says else "SKIP"
+            logger.debug("Classifier %s: %s — %s", verdict, sender, subject[:60])
+            return classifier_says
+        # Fallback: word-count heuristic (classifier unavailable).
         if text_body and len(text_body.split()) >= MIN_WORD_COUNT:
             logger.debug(
-                "Newsletter detected (List-Id + %d+ words): %s",
+                "Newsletter detected (fallback: List-Id + %d+ words): %s",
                 MIN_WORD_COUNT, sender,
             )
             return True
-        logger.debug("Rejected (List-Id but body too short): %s", sender)
+        logger.debug("Rejected (fallback: List-Id but body too short): %s", sender)
         return False
 
     logger.debug("Rejected (no signals matched): %s", sender)

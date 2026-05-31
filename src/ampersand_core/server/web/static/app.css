@@ -168,6 +168,29 @@ main {
 }
 
 /* Single doc view */
+.doc-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.doc-delete {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.doc-delete:hover {
+  color: #c53030;
+  border-color: #c53030;
+  background: var(--hover);
+}
+
 .doc h1 { font-size: 1.7rem; margin: 0 0 4px; line-height: 1.25; }
 
 .doc .doc-meta {

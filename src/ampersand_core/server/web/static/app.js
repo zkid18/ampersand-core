@@ -285,13 +285,34 @@ function renderDoc(doc) {
     bodyHtml = `<pre>${escapeHtml(doc.body || "")}</pre>`;
   }
 
+  const isEmail = (doc.source || "").startsWith("email://");
+  const deleteHint = isEmail
+    ? "delete this doc and feed it back as a SKIP signal for the classifier"
+    : "delete this doc";
+
   root().innerHTML = `
     <article class="doc">
+      <div class="doc-toolbar">
+        <button id="doc-delete" class="doc-delete" title="${escapeHtml(deleteHint)}">delete</button>
+      </div>
       <h1>${title}</h1>
       <div class="doc-meta">${metaBits}</div>
       <div class="doc-body">${bodyHtml}</div>
     </article>
   `;
+
+  document.getElementById("doc-delete").addEventListener("click", async () => {
+    const confirmMsg = isEmail
+      ? `Delete "${doc.title || doc.id}" and tell the classifier to skip future ones like it?`
+      : `Delete "${doc.title || doc.id}"?`;
+    if (!confirm(confirmMsg)) return;
+    const r = await api(`/vault/${encodeURIComponent(doc.id)}`, { method: "DELETE" });
+    if (!r.ok && r.status !== 204) {
+      showError("delete failed: HTTP " + r.status);
+      return;
+    }
+    location.hash = "#/";
+  });
 }
 
 // ── router ─────────────────────────────────────────────────────────

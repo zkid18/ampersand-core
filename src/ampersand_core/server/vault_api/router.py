@@ -17,6 +17,7 @@ from ampersand_core.search import (
     rerank_enabled,
     rerank_with_llm,
 )
+from ampersand_core.classifier_feedback import record_delete_as_skip
 from ampersand_core.store import (
     Conflict,
     DocMeta,
@@ -395,12 +396,31 @@ def delete_doc(
     store: Annotated[MarkdownStore, Depends(_store_dep)],
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> Response:
+    # Read first so we can record the delete as classifier feedback before
+    # the file is gone. Best-effort: a missing doc still 404s normally, and
+    # feedback failures must never block the delete.
+    feedback_payload: dict | None = None
+    try:
+        doc = store.get(doc_id)
+        feedback_payload = {
+            "doc_id": doc.meta.id,
+            "source": doc.meta.source or "",
+            "sender": (doc.meta.extra or {}).get("sender_email", ""),
+            "subject": doc.meta.title or "",
+            "body": doc.body,
+        }
+    except NotFound:
+        pass  # delete will 404 below; nothing to record
+
     try:
         store.delete(doc_id, if_match=if_match)
     except NotFound:
         raise HTTPException(status_code=404, detail="doc not found")
     except Conflict as exc:
         raise HTTPException(status_code=412, detail=str(exc))
+
+    if feedback_payload is not None:
+        record_delete_as_skip(**feedback_payload)
     return Response(status_code=204)
 
 

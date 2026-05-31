@@ -6,3 +6,7 @@ __pycache__/
 venv/
 *.egg-info/
 .DS_Store
+
+# Per-user state — never commit (sender allowlist, captured-set, vault pointer)
+.ampersand/
+state.json

@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 from ampersand_core.server.admin_cli.commands import backup as backup_cmd
+from ampersand_core.server.admin_cli.commands import classifier as classifier_cmd
 from ampersand_core.server.admin_cli.commands import integrity as integrity_cmd
 from ampersand_core.server.admin_cli.commands import rotate_key as rotate_key_cmd
 from ampersand_core.server.admin_cli.commands import stats as stats_cmd
@@ -99,6 +100,36 @@ def vec_rebuild(
 ) -> None:
     """Backfill (or refresh) the semantic search vector index."""
     vec_rebuild_cmd.run(_resolve(env_file), force=force, dry_run=dry_run)
+
+
+classifier_app = typer.Typer(
+    name="classifier",
+    help="Newsletter classifier: retrain on user feedback, manage the model.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(classifier_app)
+
+
+@classifier_app.command(name="retrain")
+def classifier_retrain(
+    env_file: EnvFileOpt = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Promote even if the candidate is worse on the holdout (overrides safety check).",
+        ),
+    ] = False,
+) -> None:
+    """Train a candidate from bundled + user feedback, promote if it doesn't regress."""
+    classifier_cmd.run(_resolve(env_file), force=force)
+
+
+@classifier_app.command(name="diff")
+def classifier_diff(env_file: EnvFileOpt = None) -> None:
+    """Show per-example holdout disagreements between current and candidate."""
+    classifier_cmd.run_diff(_resolve(env_file))
 
 
 if __name__ == "__main__":
