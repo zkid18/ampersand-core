@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from ampersand_core.search import (
     SearchError,
@@ -28,6 +28,7 @@ from ampersand_core.store import (
 
 from ampersand_core.server.vault_api.auth import require_api_key
 from ampersand_core.server.vault_api.schemas import (
+    AssetResponse,
     CreateDocRequest,
     DocMetaResponse,
     DocResponse,
@@ -185,6 +186,55 @@ def create_doc(
     doc = store.create(payload.body, payload.frontmatter)
     response.headers["ETag"] = doc.meta.content_hash
     return _doc_to_response(doc)
+
+
+# Upper bound on a single asset upload (bytes). Telegram photos are well
+# under this; documents can be larger but we cap to avoid filling the disk.
+_MAX_ASSET_BYTES = 50 * 1024 * 1024
+
+
+@router.post("/{doc_id}/assets/{filename}", response_model=AssetResponse, status_code=201)
+async def add_asset(
+    doc_id: str,
+    filename: str,
+    request: Request,
+    store: Annotated[MarkdownStore, Depends(_store_dep)],
+) -> AssetResponse:
+    """Attach a binary asset (image/file) to a doc.
+
+    The raw bytes are the request body (no multipart — keeps the dep
+    surface small). Returns the markdown-relative link to embed in the
+    doc body, e.g. `./{id}-slug/photo-01.jpg`.
+    """
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty asset body")
+    if len(data) > _MAX_ASSET_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"asset too large ({len(data)} bytes > {_MAX_ASSET_BYTES})",
+        )
+    try:
+        link = store.add_asset(doc_id, filename, data)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="doc not found")
+    except StoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return AssetResponse(doc_id=doc_id, link=link)
+
+
+@router.get("/{doc_id}/assets/{filename}")
+def get_asset(
+    doc_id: str,
+    filename: str,
+    store: Annotated[MarkdownStore, Depends(_store_dep)],
+) -> FileResponse:
+    """Serve a doc's asset bytes (so the web UI can render embedded images)."""
+    try:
+        path = store.get_asset_path(doc_id, filename)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="asset not found")
+    return FileResponse(path)
 
 
 @router.post("/search", response_model=SearchResponse)
