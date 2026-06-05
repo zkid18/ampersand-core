@@ -301,6 +301,11 @@ function renderDoc(doc) {
     </article>
   `;
 
+  // Embedded images use doc-relative links (./{id-slug}/photo.jpg) that the
+  // browser can't fetch directly — the asset route needs a Bearer key. Pull
+  // each one as an authed blob and swap in an object URL.
+  hydrateDocImages(doc.id);
+
   document.getElementById("doc-delete").addEventListener("click", async () => {
     const confirmMsg = isEmail
       ? `Delete "${doc.title || doc.id}" and tell the classifier to skip future ones like it?`
@@ -313,6 +318,30 @@ function renderDoc(doc) {
     }
     location.hash = "#/";
   });
+}
+
+// Fetch embedded doc images through the authed asset route and swap each
+// <img> src for an object URL. Links are doc-relative: `./{stem}/{file}`
+// or `{stem}/{file}` — we only need the trailing `{file}` for the API path
+// (GET /vault/{id}/assets/{filename}).
+async function hydrateDocImages(docId) {
+  const imgs = Array.from(document.querySelectorAll(".doc-body img"));
+  for (const img of imgs) {
+    const raw = img.getAttribute("src") || "";
+    // Leave absolute/data URLs alone — only rewrite our relative asset links.
+    if (/^(https?:|data:|blob:)/i.test(raw)) continue;
+    const filename = raw.split("/").filter(Boolean).pop();
+    if (!filename) continue;
+    try {
+      const r = await api(`/vault/${encodeURIComponent(docId)}/assets/${encodeURIComponent(filename)}`);
+      if (!r.ok) { img.alt = `image unavailable (${r.status})`; continue; }
+      const blob = await r.blob();
+      img.src = URL.createObjectURL(blob);
+      img.style.maxWidth = "100%";
+    } catch (e) {
+      img.alt = "image failed to load";
+    }
+  }
 }
 
 // ── router ─────────────────────────────────────────────────────────

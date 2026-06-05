@@ -35,6 +35,13 @@ class DocResponse(DocMetaResponse):
     body: str
 
 
+class AssetResponse(BaseModel):
+    """Returned after attaching an asset to a doc."""
+
+    doc_id: str
+    link: str  # markdown-relative link to embed in the doc body
+
+
 class ListResponse(BaseModel):
     items: list[DocMetaResponse]
     next_cursor: str | None = None
