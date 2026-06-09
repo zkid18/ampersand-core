@@ -1,0 +1,13 @@
+# Caddyfile for the docker-compose stack.
+#
+# Differs from Caddyfile.no-tls only in the upstream host: in docker-compose,
+# Caddy and the server are separate containers, so the upstream is the
+# service name `server` (resolved by Docker's embedded DNS), not 127.0.0.1.
+#
+# Bind-mounted read-only by docker-compose.yml into /etc/caddy/Caddyfile.
+
+:80 {
+    encode gzip zstd
+    header -Server
+    reverse_proxy server:8765
+}

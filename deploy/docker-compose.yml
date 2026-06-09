@@ -1,0 +1,64 @@
+# docker-compose.yml — Ampersand server + Caddy on one box.
+#
+# Quick start:
+#   cd deploy
+#   # Generate AMPERSAND_API_KEY into .env (one time):
+#   echo "AMPERSAND_API_KEY=$(openssl rand -hex 32)" > .env
+#   # Optional, for /chat + semantic + hybrid search:
+#   echo "OPENAI_API_KEY=sk-..." >> .env
+#   docker compose up -d
+#   docker compose logs -f
+#
+# Then hit:
+#   curl http://localhost/health                                          (via Caddy)
+#   curl -H "Authorization: Bearer $AMPERSAND_API_KEY" http://localhost/vault
+#
+# What's NOT here:
+#   - Telegram bot, browser extension, email-watch, vault-watcher, feed-sync.
+#     Those run as the user CLI / separate processes. The compose stack is
+#     server-only (API + storage).
+#   - TLS. Add `caddy/Caddyfile.tls` after pointing a domain at this box.
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ampersand-server
+    restart: unless-stopped
+    environment:
+      AMPERSAND_API_KEY: ${AMPERSAND_API_KEY:?set AMPERSAND_API_KEY in .env}
+      AMPERSAND_DATA_DIR: /var/lib/ampersand/vault
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AMPERSAND_HTTP_PROXY: ${AMPERSAND_HTTP_PROXY:-}
+      AMPERSAND_YOUTUBE_AUDIO_FALLBACK: ${AMPERSAND_YOUTUBE_AUDIO_FALLBACK:-}
+    volumes:
+      - vault:/var/lib/ampersand
+    expose:
+      - "8765"
+    networks:
+      - ampersand
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ampersand-caddy
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.docker:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - ampersand
+
+volumes:
+  vault:
+  caddy_data:
+  caddy_config:
+
+networks:
+  ampersand:
