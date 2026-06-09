@@ -342,15 +342,24 @@ def search_hybrid(
     """Reciprocal rank fusion of FTS BM25 + vector KNN, with optional LLM
     re-rank as a final precision stage.
 
-    Falls back to BM25-only when the vector index isn't populated (200,
-    not 503). When `rerank=True` the candidate pool is widened to ~4×
-    `limit`, fused, then graded by gpt-4o-mini and re-sorted by relevance.
-    """
-    if vec is None:
-        results = indexer.index.search(payload.q, limit=payload.limit, mode="any")
-        return SearchResponse(results=_to_hits(results))
+    Returns 503 when the vector index isn't available (no OPENAI_API_KEY,
+    or the index hasn't been populated) — clients that want a BM25 fallback
+    should explicitly call POST /vault/search with mode="any". Silent
+    fallback was found to deceive callers about which retrieval mode they
+    were actually getting.
 
-    use_rerank = bool(payload.rerank) and rerank_enabled()
+    When `rerank=True` the candidate pool is widened to ~4× `limit`, fused,
+    then graded by gpt-4o-mini and re-sorted by relevance. If rerank was
+    requested but isn't available (no OpenAI key), responds 503 rather than
+    silently dropping the rerank stage.
+    """
+    v = _require_vec(vec)
+    if bool(payload.rerank) and not rerank_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="rerank requested but disabled — set OPENAI_API_KEY to enable.",
+        )
+    use_rerank = bool(payload.rerank)
     # When rerank is on, fetch a fatter candidate pool so the LLM has more
     # options to reorder. ~4× limit (capped to 60) is a reasonable trade
     # between coverage and prompt size.

@@ -434,6 +434,45 @@ def test_search_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_search_hybrid_503_when_vec_unavailable(client: TestClient) -> None:
+    """Without OPENAI_API_KEY the vector index dep returns None. /search/hybrid
+    used to silently fall back to BM25-only with a 200, which deceived callers
+    about which retrieval mode they were getting (Researcher RS5 finding in the
+    friction test). Now responds 503 — callers that want BM25 should call
+    /vault/search with mode='any' explicitly.
+    """
+    client.post(
+        "/vault",
+        headers=HEAD,
+        json={"body": "alpha beta gamma\n", "frontmatter": {"title": "Greek"}},
+    )
+    r = client.post(
+        "/vault/search/hybrid",
+        headers=HEAD,
+        json={"q": "alpha", "limit": 5},
+    )
+    assert r.status_code == 503
+    assert "OPENAI_API_KEY" in r.json()["detail"]
+
+
+def test_search_hybrid_503_when_rerank_requested_but_disabled(
+    client: TestClient,
+) -> None:
+    """Same loud-failure pattern for rerank — silent drop is misleading."""
+    client.post(
+        "/vault",
+        headers=HEAD,
+        json={"body": "alpha beta\n", "frontmatter": {"title": "G"}},
+    )
+    r = client.post(
+        "/vault/search/hybrid",
+        headers=HEAD,
+        json={"q": "alpha", "limit": 5, "rerank": True},
+    )
+    # Either kind of 503 is acceptable — vec or rerank precondition.
+    assert r.status_code == 503
+
+
 def test_openapi_404_when_docs_hidden(client: TestClient) -> None:
     # Default app has docs disabled so the API surface isn't advertised publicly.
     assert client.get("/openapi.json").status_code == 404
