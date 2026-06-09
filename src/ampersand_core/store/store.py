@@ -19,7 +19,7 @@ from ampersand_core.store.ids import is_valid, new_id
 from ampersand_core.store.meta_index import MetaIndex, row_to_kwargs
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
-_RESERVED_KEYS = {"id", "captured", "updated", "content_hash"}
+_RESERVED_KEYS = {"id", "captured", "updated", "content_hash", "body_hash"}
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,10 @@ class DocMeta:
     tags: list[str]
     extra: dict[str, Any]
     content_hash: str
+    # sha256 of the body bytes only (no frontmatter). Stable across re-captures
+    # of the same source, unlike content_hash which folds in mutable frontmatter
+    # like captured/updated. Used to short-circuit idempotent re-captures.
+    body_hash: str
     path: str
 
 
@@ -78,10 +82,29 @@ def _coerce_captured_at(value: Any) -> datetime | None:
     return None
 
 
-def _meta_from_frontmatter(meta: dict[str, Any], rel_path: str) -> DocMeta:
+def _compute_body_hash(body: str) -> str:
+    """sha256 of the body bytes (UTF-8). Distinct from content_hash, which
+    folds in frontmatter."""
+    return hashing.compute_hash(body.encode("utf-8"))
+
+
+def _meta_from_frontmatter(
+    meta: dict[str, Any], rel_path: str, body: str | None = None
+) -> DocMeta:
     extra = {k: v for k, v in meta.items() if k not in _RESERVED_KEYS and k not in {
         "title", "source", "type", "tags",
     }}
+    # body_hash is a newer field. Old docs on disk don't have it persisted;
+    # compute on read so DocMeta is always populated. `body` is None only
+    # when the caller has no body handy (rare — meta_index seed path) — in
+    # that case use the doc's stored content_hash as a stand-in so callers
+    # don't crash; it'll get a real body_hash on the next write.
+    if "body_hash" in meta:
+        body_hash = meta["body_hash"]
+    elif body is not None:
+        body_hash = _compute_body_hash(body)
+    else:
+        body_hash = meta["content_hash"]
     return DocMeta(
         id=meta["id"],
         title=meta.get("title"),
@@ -92,6 +115,7 @@ def _meta_from_frontmatter(meta: dict[str, Any], rel_path: str) -> DocMeta:
         tags=list(meta.get("tags") or []),
         extra=extra,
         content_hash=meta["content_hash"],
+        body_hash=body_hash,
         path=rel_path,
     )
 
@@ -170,6 +194,24 @@ class MarkdownStore:
 
     def create(self, body: str, frontmatter_in: dict[str, Any] | None = None) -> VaultDoc:
         user_meta = dict(frontmatter_in or {})
+
+        # Idempotency: same source URL twice should not produce two docs.
+        # If the source already exists in the vault:
+        #   - body unchanged → return existing doc, no write
+        #   - body changed  → update in place (preserve doc_id, captured_at)
+        # No-source captures (e.g. raw notes) skip this and always create new.
+        if (source := user_meta.get("source")) is not None:
+            existing = self.find_by_source(source)
+            if existing is not None:
+                new_body_hash = _compute_body_hash(
+                    body if body.endswith("\n") else body + "\n"
+                )
+                if existing.body_hash == new_body_hash:
+                    # True no-op: return the existing doc unchanged.
+                    return self.get(existing.id)
+                # Body diverged from last capture — refresh in place.
+                return self.update(existing.id, body, user_meta)
+
         doc_id = new_id()
         now = _now()
         captured_at = _coerce_captured_at(user_meta.get("captured_at")) or now
@@ -387,20 +429,23 @@ class MarkdownStore:
             updated_at=updated_at,
             user_meta=user_meta,
         )
+        # body_hash first — stable across re-captures, folds into content_hash
+        # so the doc-level fingerprint is coherent.
+        fm["body_hash"] = _compute_body_hash(body)
         # First pass: serialize without content_hash to derive it.
         provisional = frontmatter.dump(fm, body).encode("utf-8")
         h = hashing.compute_hash(provisional)
         fm["content_hash"] = h
         final_bytes = frontmatter.dump(fm, body).encode("utf-8")
         _atomic_write(target, final_bytes)
-        meta = _meta_from_frontmatter(fm, rel_path)
+        meta = _meta_from_frontmatter(fm, rel_path, body=body)
         self._meta_index.upsert(meta)
         return VaultDoc(meta=meta, body=body)
 
     def _read(self, path: Path, rel_path: str) -> VaultDoc:
         text = path.read_text(encoding="utf-8")
         meta, body = frontmatter.parse(text)
-        return VaultDoc(meta=_meta_from_frontmatter(meta, rel_path), body=body)
+        return VaultDoc(meta=_meta_from_frontmatter(meta, rel_path, body=body), body=body)
 
     def _write_index(self, doc_id: str, rel_path: str) -> None:
         idx = paths.index_path(self.root, doc_id)

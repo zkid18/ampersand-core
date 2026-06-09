@@ -20,7 +20,7 @@ from typing import Any
 
 from ampersand_core.store.errors import StoreError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2 added body_hash column (idempotent captures)
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 _INIT_SQL = """
@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS docs (
     updated_at    TEXT NOT NULL,
     tags          TEXT NOT NULL,
     extra         TEXT NOT NULL,
-    content_hash  TEXT NOT NULL
+    content_hash  TEXT NOT NULL,
+    body_hash     TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_docs_updated_id
@@ -97,14 +98,14 @@ class MetaIndex:
         Accepts duck-typed input so callers don't need to import DocMeta.
         Required attributes: id, path, title, source, content_type,
         captured_at (datetime), updated_at (datetime), tags, extra,
-        content_hash.
+        content_hash, body_hash.
         """
         with self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO docs"
                 "(id, path, title, source, content_type, captured_at,"
-                " updated_at, tags, extra, content_hash)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " updated_at, tags, extra, content_hash, body_hash)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     meta.id,
                     meta.path,
@@ -118,6 +119,7 @@ class MetaIndex:
                         dict(meta.extra or {}), ensure_ascii=False, default=str
                     ),
                     meta.content_hash,
+                    meta.body_hash,
                 ),
             )
 
@@ -178,7 +180,7 @@ class MetaIndex:
 
         sql = (
             "SELECT id, path, title, source, content_type, captured_at,"
-            " updated_at, tags, extra, content_hash FROM docs"
+            " updated_at, tags, extra, content_hash, body_hash FROM docs"
         )
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
@@ -206,6 +208,7 @@ def row_to_kwargs(row: tuple) -> dict[str, Any]:
         tags_json,
         extra_json,
         content_hash,
+        body_hash,
     ) = row
     return {
         "id": doc_id,
@@ -218,4 +221,5 @@ def row_to_kwargs(row: tuple) -> dict[str, Any]:
         "tags": json.loads(tags_json) if tags_json else [],
         "extra": json.loads(extra_json) if extra_json else {},
         "content_hash": content_hash,
+        "body_hash": body_hash,
     }

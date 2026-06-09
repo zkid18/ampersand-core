@@ -74,6 +74,89 @@ def test_delete_removes_file_and_index(tmp_path: Path) -> None:
         s.get(doc.meta.id)
 
 
+# ── body_hash + idempotent captures ────────────────────────────────
+
+
+def test_body_hash_is_stable_across_re_captures_with_same_body(
+    tmp_path: Path,
+) -> None:
+    """The friction test surfaced that content_hash changes per-capture (it
+    folds in mutable frontmatter). body_hash is the stable identity we
+    actually want for dedup."""
+    s = make_store(tmp_path)
+    # No source — both calls create new docs (no dedup happens), but body_hash
+    # is identical because the body is identical.
+    a = s.create("identical body\n", {"title": "A"})
+    b = s.create("identical body\n", {"title": "B"})
+    assert a.meta.body_hash == b.meta.body_hash
+    # content_hash differs because frontmatter (id, title, captured) differs.
+    assert a.meta.content_hash != b.meta.content_hash
+
+
+def test_body_hash_changes_when_body_changes(tmp_path: Path) -> None:
+    s = make_store(tmp_path)
+    a = s.create("first body\n", {"title": "T"})
+    b = s.create("different body\n", {"title": "T"})
+    assert a.meta.body_hash != b.meta.body_hash
+
+
+def test_create_with_existing_source_and_same_body_is_idempotent_noop(
+    tmp_path: Path,
+) -> None:
+    """Same source URL + same body should not create a second doc — return
+    the existing one. PKM friction test P5: re-capture was creating new ULIDs
+    on byte-identical bodies, polluting git history."""
+    s = make_store(tmp_path)
+    a = s.create(
+        "body content\n",
+        {"title": "T", "source": "https://example.com/a"},
+    )
+    b = s.create(
+        "body content\n",
+        {"title": "T", "source": "https://example.com/a"},
+    )
+    assert a.meta.id == b.meta.id
+    assert a.meta.content_hash == b.meta.content_hash
+    # No second file created.
+    docs_root = tmp_path / "docs"
+    assert sum(1 for _ in docs_root.rglob("*.md")) == 1
+
+
+def test_create_with_existing_source_and_different_body_updates_in_place(
+    tmp_path: Path,
+) -> None:
+    """Same source URL + different body should update the existing doc, not
+    create a new ULID. Preserves captured_at (first-seen), advances
+    updated_at (last-refreshed)."""
+    s = make_store(tmp_path)
+    first = s.create(
+        "version one\n",
+        {"title": "T", "source": "https://example.com/b"},
+    )
+    time.sleep(1)  # ensure updated_at advances by at least a second
+    second = s.create(
+        "version two\n",
+        {"title": "T", "source": "https://example.com/b"},
+    )
+    assert first.meta.id == second.meta.id  # same doc, updated in place
+    assert first.meta.captured_at == second.meta.captured_at  # first-seen sticks
+    assert second.meta.updated_at >= first.meta.updated_at
+    assert s.get(first.meta.id).body == "version two\n"
+    # Still only one file on disk.
+    assert sum(1 for _ in (tmp_path / "docs").rglob("*.md")) == 1
+
+
+def test_create_without_source_always_creates_new_doc(tmp_path: Path) -> None:
+    """Captures without a source URL (e.g., raw notes) don't dedup — always
+    create new. Necessary because two notes with identical text are legitimately
+    different documents."""
+    s = make_store(tmp_path)
+    a = s.create("same text\n", {"title": "Note 1"})
+    b = s.create("same text\n", {"title": "Note 2"})
+    assert a.meta.id != b.meta.id
+    assert sum(1 for _ in (tmp_path / "docs").rglob("*.md")) == 2
+
+
 def test_delete_with_stale_if_match_raises_conflict(tmp_path: Path) -> None:
     s = make_store(tmp_path)
     doc = s.create("body\n", {"title": "T"})
