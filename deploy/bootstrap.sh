@@ -115,6 +115,31 @@ if ! grep -q '^OPENAI_API_KEY=' "$ENV_FILE"; then
     fi
 fi
 
+# Pre-write the CLI's vault-backend config so `sudo -u ampersand ampersand …`
+# works out of the box. Without this, the very first command in the README
+# (`ampersand capture <url>`) errors with "no vault backend configured" because
+# the CLI doesn't know it should talk to the local server. The file goes into
+# the ampersand user's home (~/.ampersand/config.json) and points at loopback
+# + reads the API key from the env file that systemd loads.
+echo "==> Writing CLI vault-backend config for ${SERVICE_USER}"
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 \
+    /var/lib/ampersand/.ampersand
+cat > /var/lib/ampersand/.ampersand/config.json <<EOF
+{
+  "vault": {
+    "backend": {
+      "kind": "http",
+      "http": {
+        "url": "http://127.0.0.1:${PORT}",
+        "api_key_env": "AMPERSAND_API_KEY"
+      }
+    }
+  }
+}
+EOF
+chown "$SERVICE_USER":"$SERVICE_USER" /var/lib/ampersand/.ampersand/config.json
+chmod 0600 /var/lib/ampersand/.ampersand/config.json
+
 # ── 5. clone CLI repo ──────────────────────────────────────────────
 
 echo "==> Fetching ampersand CLI from ${CLI_REPO_URL}"
