@@ -38,9 +38,14 @@ CREATE TABLE IF NOT EXISTS doc_sections (
 CREATE INDEX IF NOT EXISTS doc_sections_doc_id ON doc_sections(doc_id);
 """
 
-# Tokens that have meaning in FTS5 query syntax. We do best-effort escaping for
-# substring mode by quoting each whitespace-separated token.
-_FTS_OPERATOR_RE = re.compile(r'["\'()*+:^]')
+# Chars that have (or can have) meaning in FTS5 query syntax. We strip them
+# from each whitespace-/dash-split token before passing to MATCH. The original
+# regex covered the common ones (quotes, parens, *, +, :, ^); `,` `{` `}` were
+# added after a real prod incident (query "brazilian funk, miami bass" 400'd
+# with `fts5: syntax error near ","`). `?` `!` `~` `<` `>` `=` `&` `|` `\` are
+# defensive — none should appear in a natural-language search, and any of them
+# can surprise the FTS5 parser depending on context.
+_FTS_OPERATOR_RE = re.compile(r'["\'()*+:^,{}?!~<>=&|\\]')
 
 
 class SearchIndex:

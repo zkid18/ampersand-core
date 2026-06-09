@@ -244,6 +244,45 @@ def test_any_mode_falls_back_when_only_stopwords(index: SearchIndex) -> None:
     assert len(results) >= 0  # no error, may or may not match
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "brazilian funk, miami bass",  # the prod incident — comma 400'd FTS5
+        "go-to-market, sales",         # comma + hyphen
+        "alpha, beta, gamma",          # multiple commas
+        "tag1,tag2,tag3",              # no spaces
+        "name: value",                 # colon — column-filter syntax
+        "data {a,b}",                  # braces — column-filter wrapper
+        '"phrase" with stuff',         # quote in middle
+        "wildcard*?",                  # star + question
+        "(grouped) thing",             # parens
+    ],
+)
+def test_any_mode_handles_fts5_operator_chars(
+    index: SearchIndex, query: str
+) -> None:
+    """Bareword queries containing FTS5 syntax chars must not 400. Regression
+    test for the comma incident: any of these used to surface as
+    `sqlite3.OperationalError: fts5: syntax error near ","` via SearchError.
+    """
+    index.upsert_doc_sections(
+        "doc", [_section("X", "brazilian funk miami bass alpha beta phrase")]
+    )
+    # Must not raise — that's the contract this regression test enforces.
+    results = index.search(query, mode="any")
+    # Hits or no hits is fine; the point is no exception.
+    assert isinstance(results, list)
+
+
+def test_substring_mode_handles_fts5_operator_chars(index: SearchIndex) -> None:
+    """Same regression check for substring mode."""
+    index.upsert_doc_sections(
+        "doc", [_section("X", "brazilian funk miami bass")]
+    )
+    results = index.search("brazilian funk, miami bass", mode="substring")
+    assert isinstance(results, list)
+
+
 def test_is_empty_flips_after_first_upsert(index: SearchIndex) -> None:
     assert index.is_empty()
     index.upsert_doc_sections("d", [_section("A", "alpha")])
