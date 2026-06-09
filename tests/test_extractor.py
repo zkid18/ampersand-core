@@ -49,6 +49,38 @@ def test_detects_title_verify_you_are() -> None:
     assert _looks_like_challenge("anything", "Verify you are human", "") is True
 
 
+# ── 404 / not-found pages with HTTP 200 status ─────────────────────
+# Friction test: PKM + Researcher hit cases where a site served a "404
+# Not Found" page with 200 OK (Verge: "404 Not Found | The Verge"),
+# extractor saved it as a doc. Title-based detection prevents this.
+
+
+def test_detects_title_404_not_found() -> None:
+    assert _looks_like_challenge("anything", "404 Not Found | The Verge", "") is True
+
+
+def test_detects_title_page_not_found() -> None:
+    assert _looks_like_challenge("anything", "Page Not Found - Example Blog", "") is True
+
+
+def test_detects_title_this_page_could_not_be_found() -> None:
+    assert _looks_like_challenge("anything", "This page could not be found", "") is True
+
+
+def test_detects_title_page_cant_be_found_smartquote() -> None:
+    # Smart-quote variant — many CMSes emit this exact glyph.
+    assert _looks_like_challenge("anything", "Page can’t be found", "") is True
+
+
+def test_legit_article_with_404_in_title_is_not_rejected() -> None:
+    """The stems are deliberately specific (e.g., '404 not found', not just
+    '404') so an article literally about HTTP 404 doesn't false-positive.
+    """
+    body = "The HTTP 404 status code has an interesting history. " * 20
+    title = "A Brief History of HTTP 404"
+    assert _looks_like_challenge(body, title, "") is False
+
+
 # ── short-body + weak-title heuristic ──────────────────────────────
 
 

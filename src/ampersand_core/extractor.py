@@ -185,6 +185,18 @@ _CHALLENGE_TITLE_STEMS = (
     "verifying you are",
     "checking your browser",
     "security check",
+    # 404 / not-found pages — many sites serve these with HTTP 200 + a
+    # standard error page body, which the extractor used to silently
+    # save (friction test: Verge "404 Not Found | The Verge" landed in
+    # vault as a real article). Phrases are deliberately specific to
+    # avoid false-positives on legit articles whose title contains "404".
+    "404 not found",
+    "page not found",
+    "this page could not be found",
+    "page can't be found",
+    "page can’t be found",  # smart-quote variant
+    "this page isn't available",
+    "this page isn’t available",
 )
 
 
