@@ -135,6 +135,8 @@ Cross-language tested: English queries return Russian and Portuguese hits when t
 
 ## Chat with the vault
 
+> ⚠️ **WIP — notebook UI not yet public.** The `POST /chat` endpoint works today — **but only with `OPENAI_API_KEY` set on the server.** Without it, `/chat`, `/vault/search/semantic`, and `/vault/search/hybrid` all return 503. Set the key in `/etc/ampersand/env` and restart the server. (The bootstrap will prompt you for it as of v0.x; older installs need to add it manually.)
+
 The companion project `ampersand-notebook/` is a three-pane local UI:
 - **Left**: deep search → tick docs into a working set
 - **Left** (below): paste URL/YouTube → captures into vault → auto-adds to working set
@@ -301,9 +303,9 @@ BOT_ALLOWED_USER_IDS=12345678                             # comma-sep numeric Te
 ## Companion repos
 
 - [`ampersand`](https://github.com/zkid18/ampersand) — the CLI (thin client over the HTTP API)
-- `ampersand-bot` — Telegram bot
-- `ampersand-extension` — Chrome MV3 clipper
-- `ampersand-notebook` — local chat-with-vault UI
+- [`ampersand-tg-bot`](https://github.com/zkid18/ampersand-tg-bot) — Telegram bot
+- [`ampersand-extension`](https://github.com/zkid18/ampersand-extension) — Chrome MV3 clipper
+- `ampersand-notebook` — local chat-with-vault UI (WIP, not yet public)
 - `prompts/` — drop-in prompts for plugging the vault into other LLM apps
 
 ---
