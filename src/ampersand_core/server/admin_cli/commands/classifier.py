@@ -269,3 +269,47 @@ def run_diff(config: AdminConfig) -> None:
     _show("GOOD (candidate fixed)", good)
     _show("BAD (candidate broke)", bad)
     _show("MIXED (both wrong)", mixed)
+
+
+def run_domains(config: AdminConfig) -> None:
+    """Print the effective newsletter + promo domain lists, with provenance.
+
+    Helps the user find and edit the config files. Bundled defaults ship
+    with the package; user overrides extend them additively at
+    {data_dir}/.classifier/newsletter_domains.yaml.
+    """
+    # Make sure we resolve relative to the configured data_dir, not whatever
+    # AMPERSAND_DATA_DIR the admin shell inherited.
+    import os
+    os.environ["AMPERSAND_DATA_DIR"] = str(config.data_dir)
+
+    from ampersand_core.newsletter_domains import load_domains, reload
+    reload()  # ignore process-cached state
+    d = load_domains()
+
+    print("Bundled defaults:", d.bundled_path)
+    if d.user_path:
+        print("User override:   ", d.user_path)
+    else:
+        print(f"User override:    (none — create {config.data_dir}/.classifier/newsletter_domains.yaml to extend)")
+    print()
+
+    def _section(label: str, items: frozenset[str], src_prefix: str) -> None:
+        print(f"{label} ({len(items)}):")
+        if not items:
+            print("  (empty)")
+            return
+        for dom in sorted(items):
+            src = d.sources.get(f"{src_prefix}:{dom}", "?")
+            tag = " [user]" if src == "user" else ""
+            print(f"  {dom}{tag}")
+        print()
+
+    _section("newsletter_domains (hard ACCEPT)", d.newsletter_domains, "newsletter")
+    _section("promo_domains (hard REJECT)", d.promo_domains, "promo")
+
+    print(
+        "Add domains to the user file under `newsletter_domains:` or "
+        "`promo_domains:`.\nMerge is ADDITIVE — to remove a bundled default, "
+        "edit the bundled file and redeploy."
+    )

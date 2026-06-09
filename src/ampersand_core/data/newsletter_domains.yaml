@@ -1,0 +1,38 @@
+# Newsletter filter domain lists.
+#
+# Used by ampersand_core.newsletter_filter.is_newsletter() to decide whether
+# an incoming email is worth capturing.
+#
+# This file ships with the package as the BUNDLED DEFAULTS. To override
+# without forking the code, drop a YAML file with the same shape at:
+#
+#     {AMPERSAND_DATA_DIR}/.classifier/newsletter_domains.yaml
+#
+# (on the production droplet: /var/lib/ampersand/vault/.classifier/newsletter_domains.yaml)
+#
+# Override semantics: ADDITIVE. Entries in the user file are unioned with
+# these defaults — you can't remove a default this way, only add. If you
+# truly need to drop a default, edit this file and redeploy.
+#
+# Run `ampersand-admin classifier domains` to see what's currently loaded
+# and where each entry came from.
+
+# Newsletter platform domains. Emails from these domains are hard-ACCEPTED
+# (bucket 2 in newsletter_filter.is_newsletter) — the LogReg classifier
+# isn't consulted because we trust the platform itself as the signal.
+newsletter_domains:
+  - substack.com
+  - beehiiv.com
+  - convertkit.com
+  - buttondown.email
+  - ghost.io
+  - mailchimp.com
+  - sendfox.com
+  - hubspotemail.net
+  - revue.email
+
+# Promo / e-commerce ESP domains. Emails from these are hard-REJECTED
+# (bucket 1) regardless of List-Id, body length, or sender heuristics.
+promo_domains:
+  - klaviyomail.com
+  - shopifyemail.com

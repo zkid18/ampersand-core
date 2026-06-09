@@ -1,4 +1,11 @@
-"""Detect whether an email is a newsletter vs personal mail or promo."""
+"""Detect whether an email is a newsletter vs personal mail or promo.
+
+Domain lists (NEWSLETTER_DOMAINS, PROMO_DOMAINS) live in
+data/newsletter_domains.yaml and are loaded via `newsletter_domains.load_domains()`
+— editable by the user without code changes. See that module for override
+semantics. `ampersand-admin classifier domains` prints what's currently in
+effect.
+"""
 
 from __future__ import annotations
 
@@ -7,25 +14,9 @@ import re
 from email.message import EmailMessage
 
 from ampersand_core.newsletter_classifier import predict_keep
+from ampersand_core.newsletter_domains import load_domains
 
 logger = logging.getLogger(__name__)
-
-NEWSLETTER_DOMAINS = {
-    "substack.com",
-    "beehiiv.com",
-    "convertkit.com",
-    "buttondown.email",
-    "ghost.io",
-    "mailchimp.com",
-    "sendfox.com",
-    "hubspotemail.net",
-    "revue.email",
-}
-
-PROMO_DOMAINS = {
-    "klaviyomail.com",
-    "shopifyemail.com",
-}
 
 MIN_WORD_COUNT = 500
 
@@ -47,7 +38,7 @@ def _domain_of(address: str) -> str:
     return domain.lower()
 
 
-def _matches_domain_set(msg: EmailMessage, domains: set[str]) -> bool:
+def _matches_domain_set(msg: EmailMessage, domains) -> bool:
     """Check if Return-Path or From domain is in the given set."""
     for header_name in ("return-path", "from"):
         value = str(msg.get(header_name, ""))
@@ -79,9 +70,10 @@ def is_newsletter(msg: EmailMessage) -> bool:
     >200 words of property descriptions and were sneaking through.
     """
     sender = get_sender_email(msg)
+    domains = load_domains()
 
     # Hard rejects first — these always lose, regardless of other signals.
-    if _matches_domain_set(msg, PROMO_DOMAINS):
+    if _matches_domain_set(msg, domains.promo_domains):
         logger.debug("Rejected (promo domain): %s", sender)
         return False
     if sender.startswith("noreply@") or sender.startswith("no-reply@"):
@@ -89,7 +81,7 @@ def is_newsletter(msg: EmailMessage) -> bool:
         return False
 
     # Known newsletter platforms — strong signal, accept on its own.
-    if _matches_domain_set(msg, NEWSLETTER_DOMAINS):
+    if _matches_domain_set(msg, domains.newsletter_domains):
         logger.debug("Newsletter detected (platform domain): %s", sender)
         return True
 

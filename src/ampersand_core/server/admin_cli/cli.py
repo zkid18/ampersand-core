@@ -132,5 +132,11 @@ def classifier_diff(env_file: EnvFileOpt = None) -> None:
     classifier_cmd.run_diff(_resolve(env_file))
 
 
+@classifier_app.command(name="domains")
+def classifier_domains(env_file: EnvFileOpt = None) -> None:
+    """Show effective newsletter + promo domain lists (bundled + user override)."""
+    classifier_cmd.run_domains(_resolve(env_file))
+
+
 if __name__ == "__main__":
     app()

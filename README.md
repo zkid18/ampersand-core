@@ -14,7 +14,7 @@ Capture once, query forever. Plain markdown on disk you own. Plug into any agent
 - 🤖 **Telegram bot** — DM a link or text, lands as a doc within seconds.
 - 🧷 **Browser extension** — Chrome MV3 clipper, one-click on any page.
 - 💬 **Notebook UI** — chat with a working set of vault docs, citations clickable back to the source.
-- ✉️ **Email watcher** — IMAP IDLE captures newsletters as they arrive (multi-account, parallel).
+- ✉️ **Email watcher** — IMAP IDLE captures newsletters as they arrive (multi-account, parallel; classifier filters out promos/transactional and learns from your deletes).
 - 🦾 **Your agent** — `POST /vault/search/hybrid` from Cursor, Claude Desktop, n8n, custom code.
 
 ---
@@ -70,6 +70,41 @@ ampersand email sync        # one-shot pull of unread
 ```
 
 **Multi-account** — call `setup` once per inbox (Yahoo + Gmail + ProtonMail Bridge + your work IMAP), the watcher runs N inboxes in parallel.
+
+### The filter — why your vault doesn't fill with Shein promos
+
+Every incoming email goes through three buckets:
+
+| Bucket | Logic | Cost |
+|---|---|---|
+| **1. Hard reject** | Sender domain in `promo_domains` (Klaviyo, Shopify, …) or starts with `noreply@` | free, instant |
+| **2. Hard accept** | Sender domain in `newsletter_domains` (Substack, Beehiiv, Ghost, …) | free, instant |
+| **3. Classifier** | Email has `List-Id` header → TF-IDF + LogReg judges KEEP/SKIP | ~1ms, local |
+
+Domain lists live in `src/ampersand_core/data/newsletter_domains.yaml` — **edit that file to tune the defaults**, or drop a YAML at `{AMPERSAND_DATA_DIR}/.classifier/newsletter_domains.yaml` to extend additively without forking. Run `ampersand-admin classifier domains` to see what's currently in effect and which entries came from where.
+
+The classifier ships pre-trained on 400 LLM-bootstrapped labels (gpt-4o-mini judging "editorial vs promotional"). New installs get reasonable behavior out of the box — no labeling work required.
+
+### Learning from your deletes
+
+The web UI doc view has a **delete button**. For email-sourced docs, deleting writes a SKIP example to `{AMPERSAND_DATA_DIR}/.classifier/feedback.jsonl`. When you've banked ~10-20 deletes:
+
+```bash
+ampersand-admin classifier retrain
+# trains a candidate from bundled + feedback labels,
+# evaluates against a frozen 100-doc holdout,
+# only promotes if it doesn't regress (--force overrides)
+
+systemctl restart ampersand-email-watch   # picks up the new model
+```
+
+The frozen holdout is the load-bearing safety check — bad feedback can't silently degrade the model. If retrain rejects a candidate, run `ampersand-admin classifier diff` to see exactly which holdout examples it would have flipped.
+
+Model resolution order at runtime:
+1. `{AMPERSAND_DATA_DIR}/.classifier/model.joblib` — your retrained model
+2. `src/ampersand_core/models/newsletter_classifier.joblib` — bundled bootstrap
+
+The bundled file is never overwritten by retraining, and your retrained file is never overwritten by code deploys. They live in different paths on purpose.
 
 **Auth honesty**: there's no OAuth flow yet. You pass an IMAP password (app password for Gmail/Yahoo) and it sits in `/etc/ampersand/env` (mode `0640`) on the server. That's fine for a single-tenant personal box; it's not fine for a hosted multi-user product. If you care about secrets management, the right next step is plugging in a password manager (1Password CLI, age-encrypted file, Vault) — open issue.
 
