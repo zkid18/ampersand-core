@@ -10,3 +10,7 @@ venv/
 # Per-user state — never commit (sender allowlist, captured-set, vault pointer)
 .ampersand/
 state.json
+
+# Training run artifacts — outputs, not source data. labeled.jsonl IS tracked.
+scripts/data/labeled.spot.jsonl
+scripts/data/training_report.txt
