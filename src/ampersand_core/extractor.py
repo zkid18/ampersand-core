@@ -197,10 +197,35 @@ _CHALLENGE_TITLE_STEMS = (
     "page can’t be found",  # smart-quote variant
     "this page isn't available",
     "this page isn’t available",
+    # LinkedIn login walls — surfaced 2026-06-14 testing public profile URLs.
+    # Some profiles extract fine; others (rate-limited / A/B'd) get the login
+    # wall served with title "Sign Up | LinkedIn". Body lands around 450 chars,
+    # above the weak-title cutoff, so the title check is what actually catches it.
+    "sign up | linkedin",
+    "join linkedin",
+    # Twitter / X no-JS fallback — title `JavaScript is not available.` is
+    # served by twitter.com when the user-agent has JS disabled (which is what
+    # trafilatura looks like). Hit during 2026-06-14 testing of bogus tweet URLs.
+    "javascript is not available",
 )
 
 
-def _looks_like_challenge(text: str | None, title: str | None, html: str | None) -> bool:
+# Hosts whose HTML is deliberately built for og:meta scraping rather than
+# rendered for humans — the anti-bot heuristic must NOT fire on these even
+# when their body is short and "challenge-shaped". Order matters less than
+# correctness; we match on a `host in url` substring (cheap, no parse).
+_OG_META_FALLBACK_HOSTS = (
+    "fxtwitter.com",
+    "vxtwitter.com",
+    "nitter.net",
+    "nitter.privacydev.net",
+    "twiiit.com",
+)
+
+
+def _looks_like_challenge(
+    text: str | None, title: str | None, html: str | None, *, url: str | None = None
+) -> bool:
     """Heuristic: does this look like a wall/challenge page rather than an
     article? Three orthogonal signals — any one trips it:
 
@@ -210,9 +235,23 @@ def _looks_like_challenge(text: str | None, title: str | None, html: str | None)
     3. Extracted text body is suspiciously short AND the title is missing
        or generic — articles with weak metadata still tend to have body.
 
+    `url` is an optional bypass: if the URL is a known og:meta fallback host
+    (fxtwitter, vxtwitter, nitter, ...) we return False unconditionally — those
+    hosts deliberately serve short, structured pages that the heuristic would
+    otherwise misread as a wall.
+
     Real articles can be short, so we lean on combinations rather than
     length alone.
     """
+    # Trusted og:meta-only hosts: bypass entirely. fxtwitter/nitter return
+    # short structured pages by design — the body-length heuristic would
+    # otherwise classify their valid responses as walls.
+    if url:
+        url_lower = url.lower()
+        for trusted_host in _OG_META_FALLBACK_HOSTS:
+            if trusted_host in url_lower:
+                return False
+
     if html:
         h = html[:50_000]  # cap scan for huge SPA payloads
         for marker in _CHALLENGE_HTML_MARKERS:
@@ -271,7 +310,7 @@ def extract_article_from_html(
     if not title:
         title = fallback_title
 
-    if _looks_like_challenge(text, title, html):
+    if _looks_like_challenge(text, title, html, url=url):
         raise ValueError(
             f"Supplied HTML for {url} looks like a wall/challenge page; "
             f"capture aborted."
@@ -305,7 +344,7 @@ def extract_article(url: str) -> CapturedContent:
     needs_retry = (
         not text
         or len(text.strip()) < 200
-        or _looks_like_challenge(text, title, downloaded)
+        or _looks_like_challenge(text, title, downloaded, url=url)
     )
     if needs_retry:
         retry_html = _fetch_via_proxy(url)
@@ -313,7 +352,7 @@ def extract_article(url: str) -> CapturedContent:
             r_text, r_title, r_author = _extract_pieces(retry_html)
             retry_is_better = (
                 r_text
-                and not _looks_like_challenge(r_text, r_title, retry_html)
+                and not _looks_like_challenge(r_text, r_title, retry_html, url=url)
                 and len(r_text.strip()) > len((text or "").strip())
             )
             if retry_is_better:
@@ -323,7 +362,7 @@ def extract_article(url: str) -> CapturedContent:
     if not text:
         raise ValueError(f"Failed to extract content from: {url}")
 
-    if _looks_like_challenge(text, title, downloaded):
+    if _looks_like_challenge(text, title, downloaded, url=url):
         raise ValueError(
             f"Anti-bot wall served for {url} — short body / generic title / "
             f"captcha-widget HTML. Capture aborted; try again later or via "
