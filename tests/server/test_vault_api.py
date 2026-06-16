@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ampersand_core.server.app import app
+from ampersand_core.server.app import app, reset_job_store_cache
 from ampersand_core.server.vault_api.store_factory import reset_store_cache
 
 
@@ -14,8 +14,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
     monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
-    yield TestClient(app)
+    reset_job_store_cache()
+    # `with` here triggers lifespan startup/shutdown — needed so the
+    # background capture-worker actually runs during tests.
+    with TestClient(app) as c:
+        yield c
     reset_store_cache()
+    reset_job_store_cache()
 
 
 HEAD = {"Authorization": "Bearer devkey"}
@@ -559,6 +564,95 @@ def test_openapi_404_when_docs_hidden(client: TestClient) -> None:
     # Default app has docs disabled so the API surface isn't advertised publicly.
     assert client.get("/openapi.json").status_code == 404
     assert client.get("/docs").status_code == 404
+
+
+# ── async capture queue (extension's clip flow) ────────────────────
+
+
+def test_capture_html_async_returns_202_and_job_id(client: TestClient) -> None:
+    """The whole point of the queue: instant return for the extension popup."""
+    r = client.post(
+        "/capture/html/async", headers=HEAD,
+        json={
+            "url": "https://example.com/async-test",
+            "html": SAMPLE_ARTICLE_HTML,
+        },
+    )
+    assert r.status_code == 202, r.text
+    data = r.json()
+    assert data["status"] == "queued"
+    assert data["job_id"] and len(data["job_id"]) == 26  # ULID
+
+
+def test_capture_async_returns_202_and_job_id(client: TestClient) -> None:
+    """Same for the URL-only path (bot/CLI use this)."""
+    r = client.post(
+        "/capture/async", headers=HEAD,
+        json={"url": "https://example.com/url-async"},
+    )
+    assert r.status_code == 202
+    assert r.json()["job_id"]
+
+
+def test_get_job_returns_404_for_unknown_id(client: TestClient) -> None:
+    r = client.get("/jobs/01XXXXXXXXXXXXXXXXXXXXXXXX", headers=HEAD)
+    assert r.status_code == 404
+
+
+def test_list_jobs_returns_queue_depth(client: TestClient) -> None:
+    # Enqueue 3 jobs without giving the worker time to drain them all
+    # (worker polls every 1s — TestClient doesn't time-travel).
+    for i in range(3):
+        client.post(
+            "/capture/async", headers=HEAD,
+            json={"url": f"https://example.com/depth-{i}"},
+        )
+    r = client.get("/jobs?limit=10", headers=HEAD)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["items"]) >= 3
+    # queue_depth + done count should approximate enqueued count
+    assert body["queue_depth"] >= 0
+
+
+def test_capture_async_requires_auth(client: TestClient) -> None:
+    r = client.post("/capture/async", json={"url": "x"})
+    assert r.status_code == 401
+
+
+def test_worker_drains_a_capture_html_job(client: TestClient) -> None:
+    """End-to-end: enqueue a /capture/html/async job, wait for the worker to
+    drain it, verify the doc actually landed in the vault. The TestClient's
+    lifespan starts the worker; we poll GET /jobs/{id} until status flips."""
+    import time
+
+    r = client.post(
+        "/capture/html/async", headers=HEAD,
+        json={
+            "url": "https://example.com/worker-drain",
+            "html": SAMPLE_ARTICLE_HTML,
+        },
+    )
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+
+    # Worker polls every 1s; give it up to 8s for safety on slow CI.
+    deadline = time.time() + 8
+    final = None
+    while time.time() < deadline:
+        g = client.get(f"/jobs/{job_id}", headers=HEAD).json()
+        if g["status"] in ("done", "failed"):
+            final = g
+            break
+        time.sleep(0.2)
+    assert final is not None, "worker did not finish in time"
+    assert final["status"] == "done", f"job failed: {final.get('error')}"
+    assert final["doc_id"] and len(final["doc_id"]) == 26
+    assert final["body_hash"].startswith("sha256:")
+
+    # And the saved doc is fetchable.
+    doc = client.get(f"/vault/{final['doc_id']}", headers=HEAD).json()
+    assert doc["source"] == "https://example.com/worker-drain"
 
 
 def test_openapi_includes_vault_routes_when_docs_enabled(

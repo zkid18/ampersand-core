@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import os
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -23,12 +28,89 @@ from ampersand_core.youtube import (
     youtube_stub_from_html,
 )
 
+from ampersand_core.server.capture_jobs import (
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    JobStore,
+)
 from ampersand_core.server.chat_api import router as chat_router
 from ampersand_core.server.feed_api import router as feed_router
 from ampersand_core.server.vault_api import router as vault_router
 from ampersand_core.server.vault_api.auth import require_api_key
 from ampersand_core.server.vault_api.store_factory import get_store
 from ampersand_core.server.web import mount_static as mount_web_static, router as web_router
+
+log = logging.getLogger(__name__)
+
+_job_store_singleton: JobStore | None = None
+
+
+def _job_store() -> JobStore:
+    """Lazy singleton — the JobStore lives next to the vault on disk so it
+    follows the same data-dir hygiene as everything else (one DB per droplet,
+    survives restarts, no separate config to forget)."""
+    global _job_store_singleton
+    if _job_store_singleton is None:
+        data_dir = Path(os.environ.get("AMPERSAND_DATA_DIR", "/var/lib/ampersand/vault"))
+        _job_store_singleton = JobStore(data_dir / ".store" / "capture_jobs.db")
+    return _job_store_singleton
+
+
+def reset_job_store_cache() -> None:
+    """Drop the cached JobStore so the next call picks up a new AMPERSAND_DATA_DIR.
+    Used by tests."""
+    global _job_store_singleton
+    _job_store_singleton = None
+
+
+# Set by create_app() once the closure-scoped dispatch functions are wired up.
+# The worker runs in a separate task and needs to call into the same
+# extraction + persistence path that the sync endpoints use, but those are
+# defined inside create_app's closure. The cleanest plumbing is to register
+# the runner from inside the closure.
+_run_job_callback: callable | None = None
+
+
+def _register_job_runner(fn) -> None:
+    global _run_job_callback
+    _run_job_callback = fn
+
+
+async def _capture_worker(stop: asyncio.Event) -> None:
+    """Single-worker drain loop. Polls the store every 1s when empty, processes
+    jobs as fast as they arrive otherwise. Runs the actual extract+persist on a
+    thread so we don't block the event loop on httpx/playwright/sqlite.
+
+    Exceptions are caught and recorded on the job, never propagated — the loop
+    must survive any single-job failure or one bad URL kills the queue."""
+    if _run_job_callback is None:
+        log.error("capture-worker: no runner registered; queue will not drain")
+        return
+    store = _job_store()
+    log.info("capture-worker: started")
+    while not stop.is_set():
+        job = await asyncio.to_thread(store.claim_next)
+        if job is None:
+            # Empty queue — back off briefly, but stay responsive to shutdown.
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        job_id = job["id"]
+        try:
+            doc_id, doc_path, body_hash = await asyncio.to_thread(_run_job_callback, job)
+            await asyncio.to_thread(
+                store.mark_done, job_id,
+                doc_id=doc_id, doc_path=doc_path, body_hash=body_hash,
+            )
+            log.info("capture-worker: job %s done (doc_id=%s)", job_id, doc_id)
+        except Exception as e:  # noqa: BLE001
+            log.exception("capture-worker: job %s failed", job_id)
+            await asyncio.to_thread(store.mark_failed, job_id, f"{type(e).__name__}: {e}")
+    log.info("capture-worker: stopped")
 
 
 def _env_bool(name: str) -> bool:
@@ -83,10 +165,33 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         else {"docs_url": None, "redoc_url": None, "openapi_url": None}
     )
 
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        # Reset any jobs left in `running` state by a previous crash/restart
+        # so the worker picks them up again.
+        store = _job_store()
+        n = store.reset_running_on_startup()
+        if n:
+            log.info("capture-jobs: reset %d running jobs to queued", n)
+
+        # Start the single-worker drain loop.
+        stop = asyncio.Event()
+        task = asyncio.create_task(_capture_worker(stop))
+        try:
+            yield
+        finally:
+            # Graceful shutdown — signal the worker, wait briefly.
+            stop.set()
+            try:
+                await asyncio.wait_for(task, timeout=10)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                task.cancel()
+
     app = FastAPI(
         title="Ampersand API",
         description="Capture anything from the web as markdown.",
         version="0.1.0",
+        lifespan=_lifespan,
         **docs_kw,
     )
 
@@ -147,6 +252,23 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
             return extract_article_from_html(url, html, fallback_title=fallback_title)
         return extract_article(url)
 
+    def _run_queued_job(job: dict) -> tuple[str | None, str | None, str | None]:
+        """Worker-side: run a job row through the same extract+persist path
+        that POST /capture uses synchronously. Returns (doc_id, path, body_hash)
+        — None values when persist=False on the job."""
+        url = job["url"]
+        html = job.get("html")
+        fallback_title = job.get("fallback_title")
+        frontmatter = json.loads(job["frontmatter"]) if job.get("frontmatter") else None
+        persist = bool(job.get("persist", 1))
+
+        content = _dispatch(url, html=html, fallback_title=fallback_title)
+        if not persist:
+            return None, None, None
+        return _persist_capture(content, frontmatter)
+
+    _register_job_runner(_run_queued_job)
+
     def _persist_capture(content, frontmatter_override: dict[str, Any] | None):
         """Write captured content to the vault using the same store the vault
         router writes to. Returns (id, path, body_hash). Idempotent on
@@ -201,6 +323,77 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
             path=doc_path,
             body_hash=body_hash,
         )
+
+    # ── async capture (extension queue) ─────────────────────────────
+    #
+    # Click-and-walk-away flow: the extension/bot POSTs a URL (and optionally
+    # HTML), gets a job_id back instantly, and the actual extract+persist
+    # happens in a background worker. Lets the popup close in <100ms instead
+    # of hanging for 30-120s on YouTube/long articles.
+
+    @app.post(
+        "/capture/async",
+        status_code=202,
+        dependencies=[Depends(require_api_key)],
+    )
+    def capture_async(req: CaptureRequest) -> dict:
+        """Enqueue a URL capture for the background worker. Returns 202 +
+        {job_id}. Poll GET /jobs/{id} for status."""
+        job_id = _job_store().enqueue(
+            url=req.url,
+            persist=req.persist,
+            frontmatter=req.frontmatter,
+        )
+        return {"job_id": job_id, "status": STATUS_QUEUED}
+
+    @app.post(
+        "/capture/html/async",
+        status_code=202,
+        dependencies=[Depends(require_api_key)],
+    )
+    def capture_html_async(req: CaptureHtmlRequest) -> dict:
+        """Same as /capture/async but with caller-supplied HTML (extension's
+        clip path)."""
+        job_id = _job_store().enqueue(
+            url=req.url,
+            persist=req.persist,
+            frontmatter=req.frontmatter,
+            html=req.html,
+            fallback_title=req.title,
+        )
+        return {"job_id": job_id, "status": STATUS_QUEUED}
+
+    @app.get(
+        "/jobs/{job_id}",
+        dependencies=[Depends(require_api_key)],
+    )
+    def get_job(job_id: str) -> dict:
+        """Job status + (when done) the saved doc identity."""
+        row = _job_store().get(job_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        # Drop the bulky html payload from the response — it was useful
+        # for resuming work but the caller doesn't need it back.
+        row.pop("html", None)
+        return row
+
+    @app.get(
+        "/jobs",
+        dependencies=[Depends(require_api_key)],
+    )
+    def list_jobs(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict:
+        """List jobs, newest first. Useful for the extension's 'recent clips'
+        view and for operators inspecting queue depth."""
+        rows = _job_store().list(status=status, limit=limit)
+        for r in rows:
+            r.pop("html", None)
+        return {
+            "items": rows,
+            "queue_depth": _job_store().queue_depth(),
+        }
 
     @app.post(
         "/capture/html",
