@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 import re
 
@@ -352,9 +353,80 @@ def _looks_like_challenge(
     return False
 
 
+_OG_TITLE_RE = re.compile(
+    r'<meta[^>]*\bproperty=["\']og:title["\'][^>]*\bcontent=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_OG_TITLE_REVERSE_RE = re.compile(
+    r'<meta[^>]*\bcontent=["\']([^"\']+)["\'][^>]*\bproperty=["\']og:title["\']',
+    re.IGNORECASE,
+)
+_HTML_TITLE_RE = re.compile(r"<title[^>]*>([^<]+)</title>", re.IGNORECASE)
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _extract_og_title(html: str) -> str | None:
+    """Pull <meta property="og:title" content="..."> with attribute order
+    tolerance (some sites put content before property). Returns the
+    HTML-entity-decoded title or None."""
+    if not html:
+        return None
+    m = _OG_TITLE_RE.search(html) or _OG_TITLE_REVERSE_RE.search(html)
+    return html_lib.unescape(m.group(1).strip()) if m else None
+
+
+def _extract_html_title(html: str) -> str | None:
+    if not html:
+        return None
+    m = _HTML_TITLE_RE.search(html)
+    return html_lib.unescape(m.group(1).strip()) if m else None
+
+
+def _title_appears_in_body(title: str | None, body: str | None) -> bool:
+    """Does a meaningful chunk of `title`'s words appear in the body's first
+    1500 chars? Used to detect when trafilatura picked a heading from an
+    adjacent article on the same page — the wrong-title bug PKM/Researcher
+    surfaced on Stratechery, and today's Dan Luu /keyboard-latency/ capture
+    landed as 'Appendix: techniques that only work at small scale.'"""
+    if not title or not body:
+        return False
+    title_words = {w.lower() for w in _WORD_RE.findall(title) if len(w) > 2}
+    if not title_words:
+        return False
+    body_words = {w.lower() for w in _WORD_RE.findall(body[:1500])}
+    overlap = len(title_words & body_words) / len(title_words)
+    return overlap >= 0.5
+
+
+def _pick_best_title(
+    traf_title: str | None,
+    og_title: str | None,
+    html_title: str | None,
+    body: str | None,
+) -> str | None:
+    """Decide which extracted title to trust. Trafilatura sometimes scrapes a
+    heading from an adjacent article on the same page (sidebar listings,
+    'related posts' blocks, appendix linkbacks). Cross-check against the
+    body — if trafilatura's pick doesn't appear in the body's opening
+    1500 chars, prefer og:title (which is page-level metadata and reliably
+    matches the URL)."""
+    if traf_title and _title_appears_in_body(traf_title, body):
+        return traf_title
+    if og_title:
+        return og_title
+    if html_title:
+        return html_title
+    return traf_title
+
+
 def _extract_pieces(html: str) -> tuple[str | None, str | None, str | None]:
     """Run trafilatura.extract + extract_metadata once on a downloaded HTML
     blob. Returns (markdown_text, title, author) — any may be None.
+
+    Title pick goes through `_pick_best_title` which cross-checks
+    trafilatura's choice against the body and falls back to og:title /
+    <title> when trafilatura grabbed a heading from a different article
+    on the same page.
     """
     text = trafilatura.extract(
         html,
@@ -364,8 +436,14 @@ def _extract_pieces(html: str) -> tuple[str | None, str | None, str | None]:
         include_tables=True,
     )
     metadata = trafilatura.extract_metadata(html)
-    title = metadata.title if metadata and metadata.title else None
+    traf_title = metadata.title if metadata and metadata.title else None
     author = metadata.author if metadata and metadata.author else None
+    title = _pick_best_title(
+        traf_title,
+        _extract_og_title(html),
+        _extract_html_title(html),
+        text,
+    )
     return text, title, author
 
 
