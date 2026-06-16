@@ -10,7 +10,12 @@ User=ampersand
 Group=ampersand
 WorkingDirectory=/var/lib/ampersand
 EnvironmentFile=/etc/ampersand/env
-ExecStart=/opt/ampersand/venv/bin/ampersand feed sync
+# Server-side registry replaces the client-side state.json path the CLI used
+# to read (Self-hoster S2/S4). curl into the local server's /feeds/sync,
+# which iterates the persistent registry and runs the same extract+capture
+# loop as POST /feeds/ingest. Output goes to journal so failures show up
+# in `journalctl -u ampersand-feed-sync`.
+ExecStart=/bin/sh -c 'curl -fsS -X POST -H "Authorization: Bearer $AMPERSAND_API_KEY" -H "Content-Type: application/json" -d "{}" http://127.0.0.1:8765/feeds/sync'
 StandardOutput=journal
 StandardError=journal
 
