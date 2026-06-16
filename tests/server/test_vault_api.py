@@ -620,6 +620,64 @@ def test_capture_async_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_worker_count_helper_reads_env_with_defaults_and_clamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent-workers knob: default 1, env-overridable, clamped to [1, 8]
+    so an operator can't accidentally fork-bomb the box."""
+    from ampersand_core.server.app import _worker_count
+
+    monkeypatch.delenv("AMPERSAND_CAPTURE_WORKERS", raising=False)
+    assert _worker_count() == 1
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "4")
+    assert _worker_count() == 4
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "0")
+    assert _worker_count() == 1  # clamped up
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "100")
+    assert _worker_count() == 8  # clamped down
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "garbage")
+    assert _worker_count() == 1  # parse fallback
+
+
+def test_job_store_claim_next_is_atomic_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    """Two threads hammering claim_next on the same store must never grab the
+    same job. JobStore relies on a per-instance write lock + the WHERE status
+    guard on the UPDATE — this is the contract concurrent workers depend on."""
+    import threading
+    from ampersand_core.server.capture_jobs import JobStore, STATUS_DONE
+
+    store = JobStore(tmp_path / "jobs.db")
+    ids = [
+        store.enqueue(f"https://example.com/concurrent-{i}", persist=False)
+        for i in range(20)
+    ]
+    grabbed_by_thread: dict[int, list[str]] = {0: [], 1: []}
+
+    def worker(tid: int):
+        while True:
+            row = store.claim_next()
+            if row is None:
+                return
+            grabbed_by_thread[tid].append(row["id"])
+            store.mark_done(row["id"], doc_id=None, doc_path=None, body_hash=None)
+
+    t0 = threading.Thread(target=worker, args=(0,))
+    t1 = threading.Thread(target=worker, args=(1,))
+    t0.start(); t1.start()
+    t0.join(); t1.join()
+
+    all_grabbed = grabbed_by_thread[0] + grabbed_by_thread[1]
+    assert sorted(all_grabbed) == sorted(ids), "every job must be claimed exactly once"
+    assert set(grabbed_by_thread[0]) & set(grabbed_by_thread[1]) == set(), \
+        "no job may be claimed by both workers"
+
+
 def test_job_timeout_helper_reads_env_with_defaults_and_clamps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

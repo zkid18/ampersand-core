@@ -93,6 +93,23 @@ def _register_job_runner(fn) -> None:
     _run_job_callback = fn
 
 
+def _worker_count() -> int:
+    """How many concurrent drain workers to run. 1 by default — fine for the
+    typical clip-or-two-at-a-time desktop user. Bump it for boxes that see
+    burst traffic (the bot fan-out, a feed-sync that enqueues 50 URLs at once,
+    a CLI script that batch-captures a folder of bookmarks).
+
+    The SQLite claim_next is already atomic via JobStore's write lock, so
+    multiple workers won't grab the same job. Clamped to a sane range so
+    operators can't accidentally fork-bomb their droplet."""
+    raw = os.environ.get("AMPERSAND_CAPTURE_WORKERS", "").strip()
+    try:
+        v = int(raw) if raw else 1
+        return max(1, min(v, 8))
+    except ValueError:
+        return 1
+
+
 def _job_timeout_s() -> float:
     """Per-job wall-clock budget for extract+persist. Anything slower gets
     marked failed and the worker moves on. F2 from the queue e2e report:
@@ -108,27 +125,31 @@ def _job_timeout_s() -> float:
         return 90.0
 
 
-async def _capture_worker(stop: asyncio.Event) -> None:
-    """Single-worker drain loop. Polls the store every 1s when empty, processes
-    jobs as fast as they arrive otherwise. Runs the actual extract+persist on a
-    thread so we don't block the event loop on httpx/playwright/sqlite.
+async def _capture_worker(stop: asyncio.Event, *, worker_id: int = 0) -> None:
+    """Drain loop. One instance = one concurrent extraction at a time. Multiple
+    instances can run safely because JobStore.claim_next is transactional —
+    the SQLite UPDATE with the status guard means two workers can't pick up
+    the same row. Each worker pulls from the same shared queue and processes
+    independently; there's no inter-worker coordination beyond the shared
+    `stop` event.
 
-    Per-job timeout (F2): wraps the thread call in asyncio.wait_for so a
-    single hung extraction can't stall the line. Note: a timed-out job's
-    underlying thread keeps running (Python can't safely kill a thread)
-    until the extraction's own internal timeouts fire. We accept that
-    short-term thread pile-up — most "slow" jobs are network-bound and
-    idle. If this ever becomes a real memory issue we'd need subprocess-
-    based workers, not threads.
+    Runs the actual extract+persist on a thread so we don't block the event
+    loop on httpx/playwright/sqlite. Per-job timeout (F2): wraps the thread
+    call in asyncio.wait_for so a single hung extraction can't stall the
+    line. Note: a timed-out job's underlying thread keeps running (Python
+    can't safely kill a thread) until the extraction's own internal timeouts
+    fire. We accept short-term thread pile-up — most "slow" jobs are
+    network-bound and idle. If this ever becomes a real memory issue we'd
+    need subprocess-based workers, not threads.
 
     Exceptions are caught and recorded on the job, never propagated — the loop
     must survive any single-job failure or one bad URL kills the queue."""
     if _run_job_callback is None:
-        log.error("capture-worker: no runner registered; queue will not drain")
+        log.error("capture-worker[%d]: no runner registered; queue will not drain", worker_id)
         return
     store = _job_store()
     timeout = _job_timeout_s()
-    log.info("capture-worker: started (per-job timeout=%.0fs)", timeout)
+    log.info("capture-worker[%d]: started (per-job timeout=%.0fs)", worker_id, timeout)
     while not stop.is_set():
         job = await asyncio.to_thread(store.claim_next)
         if job is None:
@@ -148,12 +169,12 @@ async def _capture_worker(stop: asyncio.Event) -> None:
                 store.mark_done, job_id,
                 doc_id=doc_id, doc_path=doc_path, body_hash=body_hash,
             )
-            log.info("capture-worker: job %s done (doc_id=%s)", job_id, doc_id)
+            log.info("capture-worker[%d]: job %s done (doc_id=%s)", worker_id, job_id, doc_id)
         except asyncio.TimeoutError:
             log.warning(
-                "capture-worker: job %s timed out after %.0fs; "
+                "capture-worker[%d]: job %s timed out after %.0fs; "
                 "marking failed and moving on (thread continues in background)",
-                job_id, timeout,
+                worker_id, job_id, timeout,
             )
             await asyncio.to_thread(
                 store.mark_failed, job_id,
@@ -161,9 +182,9 @@ async def _capture_worker(stop: asyncio.Event) -> None:
                 "Try again later or increase AMPERSAND_CAPTURE_JOB_TIMEOUT_S.",
             )
         except Exception as e:  # noqa: BLE001
-            log.exception("capture-worker: job %s failed", job_id)
+            log.exception("capture-worker[%d]: job %s failed", worker_id, job_id)
             await asyncio.to_thread(store.mark_failed, job_id, f"{type(e).__name__}: {e}")
-    log.info("capture-worker: stopped")
+    log.info("capture-worker[%d]: stopped", worker_id)
 
 
 def _env_bool(name: str) -> bool:
@@ -226,11 +247,16 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         n = store.reset_running_on_startup()
         if n:
             log.info("capture-jobs: reset %d running jobs to queued", n)
-        log.info("capture-worker: lifespan starting")
+        n_workers = _worker_count()
+        log.info("capture-worker: lifespan starting (workers=%d)", n_workers)
 
-        # Start the single-worker drain loop.
+        # Spawn N workers, all sharing the same stop event. claim_next on the
+        # JobStore is transactional, so they won't grab duplicates.
         stop = asyncio.Event()
-        task = asyncio.create_task(_capture_worker(stop))
+        tasks = [
+            asyncio.create_task(_capture_worker(stop, worker_id=i))
+            for i in range(n_workers)
+        ]
         try:
             yield
         finally:
@@ -238,22 +264,29 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
             # 10s wait_for + task.cancel() was too aggressive; mid-Playwright
             # jobs run on a thread that ignores asyncio cancellation, and
             # systemd then SIGKILL'd the process ~20s later. Better path:
-            # signal the worker (which exits at the top of the next loop
-            # iteration), and give the in-flight job 25s to finish on its
-            # own. If it overruns, systemd's StopTimeoutSec eventually wins
-            # — but most jobs complete inside the budget.
+            # signal the workers (which exit at the top of the next loop
+            # iteration), and give in-flight jobs 25s to finish on their
+            # own. If they overrun, systemd's StopTimeoutSec eventually wins
+            # — but most jobs complete inside the budget. Jobs still
+            # `running` at exit are reset to `queued` on next startup.
             stop.set()
-            log.info("capture-worker: stop signalled; waiting up to 25s for in-flight job")
+            log.info(
+                "capture-worker: stop signalled; waiting up to 25s for "
+                "%d in-flight workers", n_workers,
+            )
             try:
-                await asyncio.wait_for(task, timeout=25)
-                log.info("capture-worker: shut down cleanly")
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=25)
+                log.info("capture-worker: all workers shut down cleanly")
             except asyncio.TimeoutError:
                 log.warning(
-                    "capture-worker: did not shut down within 25s — "
-                    "letting systemd terminate the process; in-flight job "
-                    "will be reset to queued on next startup"
+                    "capture-worker: %d workers did not shut down within 25s — "
+                    "letting systemd terminate the process; in-flight jobs "
+                    "will be reset to queued on next startup",
+                    sum(1 for t in tasks if not t.done()),
                 )
-                task.cancel()
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
             except asyncio.CancelledError:
                 pass
 
