@@ -153,6 +153,36 @@ def test_real_twitter_url_still_detected_as_challenge() -> None:
     )
 
 
+def test_fxtwitter_nothing_to_see_here_404_is_detected() -> None:
+    """fxtwitter's own 404 page ("Nothing to see here / Looks like this page
+    doesn't exist") must still be rejected even though fxtwitter URLs bypass
+    the general challenge heuristic. Surfaced 2026-06-14."""
+    body = (
+        "Looks like this page doesn't exist. Here's a picture of a poodle "
+        "sitting in a chair for your trouble."
+    )
+    assert (
+        _looks_like_challenge(
+            body, "Nothing to see here", "",
+            url="https://fxtwitter.com/karpathy/status/9999999999",
+        )
+        is True
+    )
+
+
+def test_fxtwitter_real_tweet_still_passes() -> None:
+    """A real fxtwitter tweet response (short body, plain title) must not
+    be rejected — that's the whole point of the bypass."""
+    body = "Some actual tweet content extracted from og:description"
+    assert (
+        _looks_like_challenge(
+            body, "Andrej Karpathy", "",
+            url="https://fxtwitter.com/karpathy/status/1234567890",
+        )
+        is False
+    )
+
+
 # ── short-body + weak-title heuristic ──────────────────────────────
 
 

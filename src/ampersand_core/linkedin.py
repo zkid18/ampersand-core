@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 import tempfile
@@ -137,9 +138,12 @@ def _inspect_post(url: str) -> tuple[str | None, str | None, str, str | None, st
         try:
             og_title = page.locator('meta[property="og:title"]').get_attribute("content")
             if og_title:
-                title = og_title
+                # LinkedIn (and many other sites) HTML-encode entities in og:meta —
+                # "You'll" → "You&#39;ll", "&" → "&amp;". Decode so titles render
+                # cleanly in Obsidian/markdown viewers.
+                title = html.unescape(og_title)
                 # LinkedIn og:title is often "Author Name on LinkedIn: post text..."
-                m = re.match(r"^(.+?)\s+on\s+LinkedIn", og_title)
+                m = re.match(r"^(.+?)\s+on\s+LinkedIn", title)
                 if m:
                     author = m.group(1)
         except Exception:
@@ -147,7 +151,7 @@ def _inspect_post(url: str) -> tuple[str | None, str | None, str, str | None, st
         try:
             og_desc = page.locator('meta[property="og:description"]').get_attribute("content")
             if og_desc and og_desc.strip():
-                description = og_desc.strip()
+                description = html.unescape(og_desc.strip())
         except Exception:
             pass
 

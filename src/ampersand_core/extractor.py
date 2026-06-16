@@ -236,6 +236,19 @@ _OG_META_FALLBACK_HOSTS = (
     "twiiit.com",
 )
 
+# Markers in title or body that indicate an og:meta-fallback host's OWN 404
+# page (i.e. the tweet was deleted / never existed). Only checked under the
+# `_OG_META_FALLBACK_HOSTS` bypass — we don't want to false-positive on real
+# articles whose body happens to contain "this page doesn't exist."
+# Surfaced 2026-06-14 capturing a missing fxtwitter tweet which served
+# title "Nothing to see here" + body "Looks like this page doesn't exist.
+# Here's a picture of a poodle..."
+_OG_META_FALLBACK_NOT_FOUND_MARKERS = (
+    "nothing to see here",
+    "this page doesn't exist",
+    "this page doesn’t exist",  # smart-quote variant
+)
+
 
 def _looks_like_challenge(
     text: str | None, title: str | None, html: str | None, *, url: str | None = None
@@ -257,13 +270,20 @@ def _looks_like_challenge(
     Real articles can be short, so we lean on combinations rather than
     length alone.
     """
-    # Trusted og:meta-only hosts: bypass entirely. fxtwitter/nitter return
-    # short structured pages by design — the body-length heuristic would
-    # otherwise classify their valid responses as walls.
+    # Trusted og:meta-only hosts: bypass the general heuristic. fxtwitter/
+    # nitter return short structured pages by design — the body-length
+    # heuristic would otherwise classify their valid responses as walls.
+    # We do still check for the host's *own* 404 / deleted-tweet pages,
+    # since those would otherwise be saved as real docs.
     if url:
         url_lower = url.lower()
         for trusted_host in _OG_META_FALLBACK_HOSTS:
             if trusted_host in url_lower:
+                norm_title = (title or "").strip().lower()
+                body_lower = (text or "").strip().lower()
+                for marker in _OG_META_FALLBACK_NOT_FOUND_MARKERS:
+                    if marker in norm_title or marker in body_lower:
+                        return True
                 return False
 
     if html:
