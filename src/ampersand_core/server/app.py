@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ from ampersand_core.server.chat_api import router as chat_router
 from ampersand_core.server.feed_api import router as feed_router
 from ampersand_core.server.vault_api import router as vault_router
 from ampersand_core.server.vault_api.auth import require_api_key
+from ampersand_core.server.vault_api.store_factory import get_store
 from ampersand_core.server.web import mount_static as mount_web_static, router as web_router
 
 
@@ -35,12 +37,25 @@ def _env_bool(name: str) -> bool:
 
 class CaptureRequest(BaseModel):
     url: str
+    # When true (default), persist the captured doc to the vault as well as
+    # returning the extracted markdown. Was extract-only historically; the
+    # README's "POST /capture — for your own scripts" implies persistence
+    # and the friction inventory flagged the gap. Backward-compat is
+    # preserved by leaving the extract-only fields in CaptureResponse — old
+    # callers that ignore the new `id`/`path` fields keep working.
+    persist: bool = True
+    # Optional frontmatter overrides merged on top of what the extractor
+    # produces. Used by the extension/bot to add tags like ["clipper"]
+    # without having to do a second POST /vault step.
+    frontmatter: dict[str, Any] | None = None
 
 
 class CaptureHtmlRequest(BaseModel):
     url: str
     html: str
     title: str | None = None
+    persist: bool = True
+    frontmatter: dict[str, Any] | None = None
 
 
 class CaptureResponse(BaseModel):
@@ -48,6 +63,11 @@ class CaptureResponse(BaseModel):
     url: str
     content_type: str
     markdown: str
+    # Populated when persist=True (default). Mirrors DocResponse identity
+    # fields so callers can act on the saved doc without a second round-trip.
+    id: str | None = None
+    path: str | None = None
+    body_hash: str | None = None
 
 
 def create_app(*, docs_visible: bool | None = None) -> FastAPI:
@@ -127,23 +147,59 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
             return extract_article_from_html(url, html, fallback_title=fallback_title)
         return extract_article(url)
 
+    def _persist_capture(content, frontmatter_override: dict[str, Any] | None):
+        """Write captured content to the vault using the same store the vault
+        router writes to. Returns (id, path, body_hash). Idempotent on
+        `source` URL — re-capturing the same URL updates in place rather
+        than creating a duplicate doc."""
+        fm: dict[str, Any] = {
+            "title": content.title,
+            "source": content.url,
+            "type": content.content_type.value,
+        }
+        if getattr(content, "author", None):
+            fm["author"] = content.author
+        if frontmatter_override:
+            fm.update(frontmatter_override)
+            # The extractor's title/source/type are authoritative — don't let
+            # caller-supplied "" or None silently wipe them.
+            for key in ("title", "source", "type"):
+                if not fm.get(key):
+                    fm.pop(key, None)
+        store = get_store()
+        doc = store.create(to_markdown(content), fm)
+        return doc.meta.id, doc.meta.path, doc.meta.body_hash
+
     @app.post(
         "/capture",
         response_model=CaptureResponse,
         dependencies=[Depends(require_api_key)],
     )
     def capture(req: CaptureRequest) -> CaptureResponse:
-        """Capture a URL and return clean markdown. Requires a Bearer API key."""
+        """Capture a URL and return clean markdown. Requires a Bearer API key.
+
+        By default the doc is also persisted to the vault (idempotent on
+        the source URL). Pass `persist=false` to extract without saving."""
         try:
             content = _dispatch(req.url, html=None, fallback_title=None)
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e))
+
+        doc_id = doc_path = body_hash = None
+        if req.persist:
+            try:
+                doc_id, doc_path, body_hash = _persist_capture(content, req.frontmatter)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"capture extracted but persist failed: {e}")
 
         return CaptureResponse(
             title=content.title,
             url=content.url,
             content_type=content.content_type.value,
             markdown=to_markdown(content),
+            id=doc_id,
+            path=doc_path,
+            body_hash=body_hash,
         )
 
     @app.post(
@@ -164,11 +220,21 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e))
 
+        doc_id = doc_path = body_hash = None
+        if req.persist:
+            try:
+                doc_id, doc_path, body_hash = _persist_capture(content, req.frontmatter)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"capture extracted but persist failed: {e}")
+
         return CaptureResponse(
             title=content.title,
             url=content.url,
             content_type=content.content_type.value,
             markdown=to_markdown(content),
+            id=doc_id,
+            path=doc_path,
+            body_hash=body_hash,
         )
 
     @app.get("/health")

@@ -79,6 +79,88 @@ def test_capture_html_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_capture_html_persists_by_default(client: TestClient) -> None:
+    """The Self-hoster's v2 friction finding: POST /capture extracted but
+    did not write a doc. New default is to persist; response carries id +
+    path so callers don't need a second POST /vault round-trip."""
+    r = client.post(
+        "/capture/html", headers=HEAD,
+        json={
+            "url": "https://example.com/persist-test",
+            "html": SAMPLE_ARTICLE_HTML,
+        },
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["id"] is not None and len(data["id"]) == 26  # ULID
+    assert data["path"].startswith("docs/")
+    assert data["body_hash"] is not None and data["body_hash"].startswith("sha256:")
+
+    # And the doc is actually findable via /vault:
+    g = client.get(f"/vault/{data['id']}", headers=HEAD)
+    assert g.status_code == 200, g.text
+    assert g.json()["source"] == "https://example.com/persist-test"
+
+
+def test_capture_html_persist_false_extracts_without_writing(
+    client: TestClient,
+) -> None:
+    """Opt-out via persist=false preserves the legacy extract-only shape
+    for callers that don't want a side effect."""
+    before = client.get("/vault?limit=1", headers=HEAD).json()
+    pre_total = sum(1 for _ in before.get("items") or [])
+
+    r = client.post(
+        "/capture/html", headers=HEAD,
+        json={
+            "url": "https://example.com/no-write",
+            "html": SAMPLE_ARTICLE_HTML,
+            "persist": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["id"] is None
+    assert data["path"] is None
+    assert data["body_hash"] is None
+    # And no new doc was added (relies on the test client's fresh tmp_path).
+    after = client.get("/vault?limit=10", headers=HEAD).json()
+    sources = [it["source"] for it in (after.get("items") or [])]
+    assert "https://example.com/no-write" not in sources
+
+
+def test_capture_html_idempotent_on_same_url(client: TestClient) -> None:
+    """Re-capturing the same URL must not create a duplicate doc — same
+    body_hash → same id (relies on the store.create idempotency added in
+    commit 9f5d83e)."""
+    body = {
+        "url": "https://example.com/idem",
+        "html": SAMPLE_ARTICLE_HTML,
+    }
+    first = client.post("/capture/html", headers=HEAD, json=body).json()
+    second = client.post("/capture/html", headers=HEAD, json=body).json()
+    assert first["id"] == second["id"]
+
+
+def test_capture_html_frontmatter_override_adds_tags(
+    client: TestClient,
+) -> None:
+    """The extension wants to pass tags like ['clipper'] without a second
+    POST /vault. New `frontmatter` field merges over the extractor's output."""
+    r = client.post(
+        "/capture/html", headers=HEAD,
+        json={
+            "url": "https://example.com/tagged",
+            "html": SAMPLE_ARTICLE_HTML,
+            "frontmatter": {"tags": ["clipper", "ai-native"]},
+        },
+    )
+    assert r.status_code == 200, r.text
+    doc_id = r.json()["id"]
+    g = client.get(f"/vault/{doc_id}", headers=HEAD).json()
+    assert set(g.get("tags") or []) == {"clipper", "ai-native"}
+
+
 def test_capture_html_falls_back_to_html_when_no_transcript(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
