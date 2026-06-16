@@ -59,6 +59,53 @@ class HTTPBackend:
             raise BackendError(f"http capture failed: {exc}") from exc
         return r.json()
 
+    # ── feed registry (server-side) ──────────────────────────────────
+    #
+    # The server owns the persistent feed list as of ampersand-core c9a02a4
+    # (Self-hoster S2/S4 fix). These thin wrappers let the CLI route feed
+    # commands to the server instead of writing client-side state.json.
+
+    def feeds_register(
+        self, url: str, *, name: str | None = None, tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            r = self._client.post(
+                "/feeds/register",
+                json={"url": url, "name": name, "tags": tags or []},
+            )
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise BackendError(f"http feeds_register failed: {exc}") from exc
+        return r.json()
+
+    def feeds_list(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
+        try:
+            params = {"enabled_only": "true"} if enabled_only else {}
+            r = self._client.get("/feeds", params=params)
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise BackendError(f"http feeds_list failed: {exc}") from exc
+        return r.json().get("items", [])
+
+    def feeds_remove(self, feed_id: str) -> None:
+        try:
+            r = self._client.delete(f"/feeds/{feed_id}")
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise BackendError(f"http feeds_remove failed: {exc}") from exc
+
+    def feeds_sync(self, *, timeout: float | None = None) -> dict[str, Any]:
+        try:
+            # Sync can run long when many entries are new — let callers pass a
+            # higher per-call timeout without disturbing the client's default.
+            r = self._client.post(
+                "/feeds/sync", json={}, timeout=timeout or self._client.timeout,
+            )
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise BackendError(f"http feeds_sync failed: {exc}") from exc
+        return r.json()
+
     def close(self) -> None:
         self._client.close()
 
