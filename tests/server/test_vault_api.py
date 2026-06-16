@@ -620,6 +620,30 @@ def test_capture_async_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_job_timeout_helper_reads_env_with_defaults_and_clamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F2: the per-job timeout helper must default sensibly, accept env
+    overrides, and clamp absurd values. The worker's wait_for wrapper is
+    stdlib behavior we don't need to retest — but the budget knob is ours."""
+    from ampersand_core.server.app import _job_timeout_s
+
+    monkeypatch.delenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", raising=False)
+    assert _job_timeout_s() == 90.0  # default
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "30")
+    assert _job_timeout_s() == 30.0
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "1")
+    assert _job_timeout_s() == 10.0  # clamped up
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "9999")
+    assert _job_timeout_s() == 600.0  # clamped down
+
+    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "garbage")
+    assert _job_timeout_s() == 90.0  # falls back on parse error
+
+
 def test_worker_drains_a_capture_html_job(client: TestClient) -> None:
     """End-to-end: enqueue a /capture/html/async job, wait for the worker to
     drain it, verify the doc actually landed in the vault. The TestClient's

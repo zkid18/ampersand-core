@@ -93,10 +93,33 @@ def _register_job_runner(fn) -> None:
     _run_job_callback = fn
 
 
+def _job_timeout_s() -> float:
+    """Per-job wall-clock budget for extract+persist. Anything slower gets
+    marked failed and the worker moves on. F2 from the queue e2e report:
+    a single 62s httpbin failure stalled the line behind it. Configurable
+    so you can bump it for heavy YouTube/Playwright loads."""
+    raw = os.environ.get("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "").strip()
+    try:
+        v = float(raw) if raw else 90.0
+        # Clamp to a sane range — silently-tiny timeouts would brick the
+        # queue; absurdly large ones defeat the point.
+        return max(10.0, min(v, 600.0))
+    except ValueError:
+        return 90.0
+
+
 async def _capture_worker(stop: asyncio.Event) -> None:
     """Single-worker drain loop. Polls the store every 1s when empty, processes
     jobs as fast as they arrive otherwise. Runs the actual extract+persist on a
     thread so we don't block the event loop on httpx/playwright/sqlite.
+
+    Per-job timeout (F2): wraps the thread call in asyncio.wait_for so a
+    single hung extraction can't stall the line. Note: a timed-out job's
+    underlying thread keeps running (Python can't safely kill a thread)
+    until the extraction's own internal timeouts fire. We accept that
+    short-term thread pile-up — most "slow" jobs are network-bound and
+    idle. If this ever becomes a real memory issue we'd need subprocess-
+    based workers, not threads.
 
     Exceptions are caught and recorded on the job, never propagated — the loop
     must survive any single-job failure or one bad URL kills the queue."""
@@ -104,7 +127,8 @@ async def _capture_worker(stop: asyncio.Event) -> None:
         log.error("capture-worker: no runner registered; queue will not drain")
         return
     store = _job_store()
-    log.info("capture-worker: started")
+    timeout = _job_timeout_s()
+    log.info("capture-worker: started (per-job timeout=%.0fs)", timeout)
     while not stop.is_set():
         job = await asyncio.to_thread(store.claim_next)
         if job is None:
@@ -116,12 +140,26 @@ async def _capture_worker(stop: asyncio.Event) -> None:
             continue
         job_id = job["id"]
         try:
-            doc_id, doc_path, body_hash = await asyncio.to_thread(_run_job_callback, job)
+            doc_id, doc_path, body_hash = await asyncio.wait_for(
+                asyncio.to_thread(_run_job_callback, job),
+                timeout=timeout,
+            )
             await asyncio.to_thread(
                 store.mark_done, job_id,
                 doc_id=doc_id, doc_path=doc_path, body_hash=body_hash,
             )
             log.info("capture-worker: job %s done (doc_id=%s)", job_id, doc_id)
+        except asyncio.TimeoutError:
+            log.warning(
+                "capture-worker: job %s timed out after %.0fs; "
+                "marking failed and moving on (thread continues in background)",
+                job_id, timeout,
+            )
+            await asyncio.to_thread(
+                store.mark_failed, job_id,
+                f"Job exceeded {timeout:.0f}s budget — extractor stalled. "
+                "Try again later or increase AMPERSAND_CAPTURE_JOB_TIMEOUT_S.",
+            )
         except Exception as e:  # noqa: BLE001
             log.exception("capture-worker: job %s failed", job_id)
             await asyncio.to_thread(store.mark_failed, job_id, f"{type(e).__name__}: {e}")
