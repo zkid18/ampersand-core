@@ -99,10 +99,30 @@ def extract_youtube(url: str) -> CapturedContent:
                 logger.exception("audio fallback crashed for %s", url)
 
     if not transcript:
-        reason = (
-            "YouTube blocked this server's IP" if transcript_err == "ip_blocked"
-            else "captions disabled or no track in our languages"
-        )
+        # Surfaced 2026-06-13: "YouTube blocked this server's IP" was being
+        # reported when the actual cause was `sudo -u ampersand` stripping
+        # AMPERSAND_YOUTUBE_PROXY out of the subshell environment. The fetch
+        # then went out from the cloud IP and YT blocked it — accurately
+        # called "ip_blocked" but misleadingly diagnosed. Distinguish based
+        # on whether a proxy was actually visible to this process.
+        if transcript_err == "ip_blocked":
+            if _proxy_url():
+                reason = (
+                    "YouTube blocked even via the configured residential proxy. "
+                    "The proxy's IP may be on YouTube's blocklist — try rotating "
+                    "the residential pool, or use a different provider."
+                )
+            else:
+                reason = (
+                    "YouTube blocked this server's IP and no proxy is "
+                    "configured in this process's environment. "
+                    f"Set {PROXY_ENV} to a residential proxy URL. If you are "
+                    "running this via `sudo -u ampersand`, sudo strips the "
+                    "environment by default — use `sudo -E -u ampersand` or "
+                    "source `/etc/ampersand/env` before invoking."
+                )
+        else:
+            reason = "captions disabled or no track in our languages"
         raise YouTubeTranscriptUnavailable(
             f"No transcript for {url} — {reason}",
             title=title,
