@@ -15,7 +15,8 @@ import sys
 import ampersand_core.server.feed_api.router  # noqa: F401
 feed_router_mod = sys.modules["ampersand_core.server.feed_api.router"]
 
-from ampersand_core.server.app import app
+from ampersand_core.server.app import app, reset_job_store_cache
+from ampersand_core.server.feed_api.router import reset_registry_cache
 from ampersand_core.server.vault_api.store_factory import reset_store_cache
 
 
@@ -27,8 +28,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
     monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
-    yield TestClient(app)
+    reset_job_store_cache()
+    reset_registry_cache()
+    with TestClient(app) as c:
+        yield c
     reset_store_cache()
+    reset_job_store_cache()
+    reset_registry_cache()
 
 
 def _fake_feed(entries: list[FeedEntry]) -> FeedInfo:
@@ -201,3 +207,125 @@ def test_ingest_rejects_invalid_limit(client: TestClient) -> None:
         json={"url": "https://x", "limit": 0},
     )
     assert r.status_code == 422
+
+
+# ── server-side feed registry ─────────────────────────────────────
+
+
+def test_register_feed_creates_a_row_and_lists_it(client: TestClient) -> None:
+    """POST /feeds/register persists a feed; GET /feeds shows it. Self-hoster
+    S2/S4: the laptop's `feed add` finally reaches the server."""
+    r = client.post(
+        "/feeds/register", headers=HEAD,
+        json={
+            "url": "https://example.com/atom.xml",
+            "name": "Example",
+            "tags": ["test"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    item = r.json()
+    assert item["url"] == "https://example.com/atom.xml"
+    assert item["name"] == "Example"
+    assert item["tags"] == ["test"]
+    assert item["enabled"] is True
+    assert item["id"] and len(item["id"]) == 26
+    feed_id = item["id"]
+
+    listed = client.get("/feeds", headers=HEAD).json()
+    assert len(listed["items"]) == 1
+    assert listed["items"][0]["id"] == feed_id
+
+
+def test_register_is_idempotent_on_url(client: TestClient) -> None:
+    """Re-registering the same URL merges tags and returns the existing row,
+    NOT a duplicate. Important because feed-sync might re-run the same
+    bootstrap on every restart."""
+    url = "https://example.com/atom.xml"
+    a = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": url, "tags": ["a"]},
+    ).json()
+    b = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": url, "tags": ["b"]},
+    ).json()
+    assert a["id"] == b["id"]
+    assert set(b["tags"]) == {"a", "b"}
+
+    listed = client.get("/feeds", headers=HEAD).json()
+    assert len(listed["items"]) == 1
+
+
+def test_disable_then_enable_round_trips(client: TestClient) -> None:
+    feed_id = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": "https://example.com/atom.xml"},
+    ).json()["id"]
+
+    disabled = client.post(f"/feeds/{feed_id}/disable", headers=HEAD).json()
+    assert disabled["enabled"] is False
+
+    enabled_only = client.get("/feeds?enabled_only=true", headers=HEAD).json()
+    assert enabled_only["items"] == []
+
+    enabled = client.post(f"/feeds/{feed_id}/enable", headers=HEAD).json()
+    assert enabled["enabled"] is True
+
+
+def test_delete_removes_the_feed(client: TestClient) -> None:
+    feed_id = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": "https://example.com/atom.xml"},
+    ).json()["id"]
+    r = client.delete(f"/feeds/{feed_id}", headers=HEAD)
+    assert r.status_code == 204
+    assert client.get("/feeds", headers=HEAD).json()["items"] == []
+
+
+def test_delete_unknown_feed_404s(client: TestClient) -> None:
+    r = client.delete("/feeds/01XXXXXXXXXXXXXXXXXXXXXXXX", headers=HEAD)
+    assert r.status_code == 404
+
+
+def test_sync_all_runs_each_enabled_feed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POST /feeds/sync drains every enabled feed. We mock _parse so this
+    doesn't actually hit the network — we just want to verify the registry
+    iteration path."""
+    # Register two feeds, disable one.
+    a = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": "https://example.com/a.xml"},
+    ).json()
+    b = client.post(
+        "/feeds/register", headers=HEAD,
+        json={"url": "https://example.com/b.xml"},
+    ).json()
+    client.post(f"/feeds/{b['id']}/disable", headers=HEAD)
+
+    # Mock _parse to return a no-entry feed (the iteration is what we care
+    # about; per-feed capture logic is exercised by the existing /ingest tests).
+    def fake_parse(url):
+        return _fake_feed([])
+    monkeypatch.setattr(feed_router_mod, "_parse", fake_parse)
+
+    r = client.post("/feeds/sync", headers=HEAD)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_feeds"] == 1  # only the enabled one
+    assert len(body["results"]) == 1
+    assert body["results"][0]["feed_id"] == a["id"]
+    assert body["results"][0]["status"] == "ok"
+
+    # last_sync_at gets recorded on the registry row.
+    listed = client.get("/feeds", headers=HEAD).json()
+    synced_a = next(it for it in listed["items"] if it["id"] == a["id"])
+    assert synced_a["last_sync_at"] is not None
+    assert synced_a["last_status"] == "ok"
+
+
+def test_register_requires_auth(client: TestClient) -> None:
+    r = client.post("/feeds/register", json={"url": "x"})
+    assert r.status_code == 401
