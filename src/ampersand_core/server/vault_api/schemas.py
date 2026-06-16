@@ -19,16 +19,35 @@ class UpdateDocRequest(BaseModel):
 
 
 class DocMetaResponse(BaseModel):
+    """Identity + metadata of a doc.
+
+    Schema unification note: PKM v2 friction inventory flagged drift between
+    the on-disk frontmatter (which uses Obsidian-friendly short names
+    `type`/`captured`/`updated` — Dataview reads from these) and the JSON
+    response (which historically used Pydantic-style `content_type`/
+    `captured_at`/`updated_at`). Both name sets are now emitted with
+    identical values so callers can pick whichever fits. The on-disk names
+    are the canonical / preferred ones for new code; the *_at variants are
+    retained for backward compat and will likely stay forever — they're
+    cheap.
+    """
+
     id: str
     path: str
     title: str | None = None
     source: str | None = None
+    # Canonical (matches on-disk frontmatter / Obsidian's Dataview style).
+    type: str | None = None
+    captured: datetime
+    updated: datetime
+    # Legacy snake-case-at names. Same values as the canonical fields above.
     content_type: str | None = None
     captured_at: datetime
     updated_at: datetime
     tags: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
     content_hash: str
+    body_hash: str | None = None
 
 
 class DocResponse(DocMetaResponse):

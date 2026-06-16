@@ -702,6 +702,50 @@ def test_job_timeout_helper_reads_env_with_defaults_and_clamps(
     assert _job_timeout_s() == 90.0  # falls back on parse error
 
 
+def test_doc_response_emits_both_canonical_and_legacy_field_names(
+    client: TestClient,
+) -> None:
+    """Schema unification: PKM v2 flagged that DocResponse used `content_type`/
+    `captured_at`/`updated_at` while on-disk frontmatter uses `type`/`captured`/
+    `updated`. Dataview queries written against on-disk names broke when going
+    through the API. The response now emits BOTH name sets — non-breaking for
+    legacy callers, friendly for Dataview-style consumers."""
+    create = client.post(
+        "/vault", headers=HEAD,
+        json={
+            "body": "test body\n",
+            "frontmatter": {
+                "title": "Schema Test",
+                "source": "https://example.com/schema",
+                "type": "article",
+            },
+        },
+    )
+    assert create.status_code == 201, create.text
+    doc_id = create.json()["id"]
+
+    # GET the doc; both name sets must be present with identical values.
+    r = client.get(f"/vault/{doc_id}", headers=HEAD)
+    assert r.status_code == 200
+    doc = r.json()
+
+    # canonical
+    assert doc["type"] == "article"
+    assert "captured" in doc
+    assert "updated" in doc
+    # legacy
+    assert doc["content_type"] == "article"
+    assert "captured_at" in doc
+    assert "updated_at" in doc
+    # same values
+    assert doc["type"] == doc["content_type"]
+    assert doc["captured"] == doc["captured_at"]
+    assert doc["updated"] == doc["updated_at"]
+    # And body_hash is exposed too (was None historically).
+    assert doc["body_hash"] is not None
+    assert doc["body_hash"].startswith("sha256:")
+
+
 def test_worker_drains_a_capture_html_job(client: TestClient) -> None:
     """End-to-end: enqueue a /capture/html/async job, wait for the worker to
     drain it, verify the doc actually landed in the vault. The TestClient's

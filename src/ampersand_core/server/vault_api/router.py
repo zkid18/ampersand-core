@@ -59,12 +59,18 @@ def _meta_to_response(meta: DocMeta) -> DocMetaResponse:
         path=meta.path,
         title=meta.title,
         source=meta.source,
+        # Dual-emit: canonical on-disk names + legacy snake_case_at aliases.
+        # See DocMetaResponse docstring — closes PKM v2 schema-drift item.
+        type=meta.content_type,
+        captured=meta.captured_at,
+        updated=meta.updated_at,
         content_type=meta.content_type,
         captured_at=meta.captured_at,
         updated_at=meta.updated_at,
         tags=list(meta.tags),
         extra=dict(meta.extra),
         content_hash=meta.content_hash,
+        body_hash=getattr(meta, "body_hash", None),
     )
 
 
