@@ -42,6 +42,21 @@ from ampersand_core.server.vault_api.auth import require_api_key
 from ampersand_core.server.vault_api.store_factory import get_store
 from ampersand_core.server.web import mount_static as mount_web_static, router as web_router
 
+# Surface ampersand-core's INFO logs through the same stderr stream uvicorn
+# writes to, which systemd's StandardError=journal then captures. Without
+# this the worker startup line + per-job done/failed lines were INVISIBLE
+# in `journalctl -u ampersand-server` (F3 from the queue e2e report). Only
+# touched when no handler is already configured — tests + production both
+# fall through cleanly.
+if not logging.getLogger("ampersand_core").handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    ))
+    _root = logging.getLogger("ampersand_core")
+    _root.addHandler(_h)
+    _root.setLevel(logging.INFO)
+
 log = logging.getLogger(__name__)
 
 _job_store_singleton: JobStore | None = None
@@ -173,6 +188,7 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         n = store.reset_running_on_startup()
         if n:
             log.info("capture-jobs: reset %d running jobs to queued", n)
+        log.info("capture-worker: lifespan starting")
 
         # Start the single-worker drain loop.
         stop = asyncio.Event()
@@ -180,12 +196,28 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         try:
             yield
         finally:
-            # Graceful shutdown — signal the worker, wait briefly.
+            # Graceful shutdown — F4 from the queue e2e report: the previous
+            # 10s wait_for + task.cancel() was too aggressive; mid-Playwright
+            # jobs run on a thread that ignores asyncio cancellation, and
+            # systemd then SIGKILL'd the process ~20s later. Better path:
+            # signal the worker (which exits at the top of the next loop
+            # iteration), and give the in-flight job 25s to finish on its
+            # own. If it overruns, systemd's StopTimeoutSec eventually wins
+            # — but most jobs complete inside the budget.
             stop.set()
+            log.info("capture-worker: stop signalled; waiting up to 25s for in-flight job")
             try:
-                await asyncio.wait_for(task, timeout=10)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=25)
+                log.info("capture-worker: shut down cleanly")
+            except asyncio.TimeoutError:
+                log.warning(
+                    "capture-worker: did not shut down within 25s — "
+                    "letting systemd terminate the process; in-flight job "
+                    "will be reset to queued on next startup"
+                )
                 task.cancel()
+            except asyncio.CancelledError:
+                pass
 
     app = FastAPI(
         title="Ampersand API",

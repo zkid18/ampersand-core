@@ -183,6 +183,65 @@ def test_fxtwitter_real_tweet_still_passes() -> None:
     )
 
 
+# ── fxtwitter wrong-tweet silent corruption (F1, 2026-06-16) ──────
+# When fxtwitter (and twitter/x in general) can't find a tweet ID under a
+# given account, sometimes the upstream returns a *different* tweet from a
+# *different* account instead of a clean 404 — saving that would attribute
+# someone else's content to the requested URL's account. Caught in queue
+# e2e: URL was /karpathy/status/1234567890; the response carried og:title
+# "Stelios (@pathfinderSport)" + Greek tweet body. Cross-check the URL's
+# account against the title's @username and reject when they disagree.
+
+
+def test_fxtwitter_url_account_vs_title_mismatch_is_rejected() -> None:
+    body = "Some content actually from another account"
+    title = "Stelios (@pathfinderSport)"
+    assert (
+        _looks_like_challenge(
+            body, title, "",
+            url="https://fxtwitter.com/karpathy/status/1234567890",
+        )
+        is True
+    )
+
+
+def test_fxtwitter_url_account_matches_title_account_passes() -> None:
+    body = "I have spent more time writing about AI-native services..."
+    title = "Andrej Karpathy (@karpathy)"
+    assert (
+        _looks_like_challenge(
+            body, title, "",
+            url="https://fxtwitter.com/karpathy/status/1814038096218857728",
+        )
+        is False
+    )
+
+
+def test_fxtwitter_title_without_username_falls_through() -> None:
+    """If the og:title has no `(@handle)` segment, we can't cross-check —
+    let it through rather than over-block."""
+    body = "Hello world"
+    title = "Just a plain tweet display"  # no @username
+    assert (
+        _looks_like_challenge(
+            body, title, "",
+            url="https://fxtwitter.com/karpathy/status/1814038096218857728",
+        )
+        is False
+    )
+
+
+def test_twitter_url_account_extraction_is_case_insensitive() -> None:
+    from ampersand_core.extractor import _twitter_account_from_url
+    assert _twitter_account_from_url(
+        "https://X.com/Karpathy/status/1234567890"
+    ) == "karpathy"
+    assert _twitter_account_from_url(
+        "https://nitter.privacydev.net/elonmusk/status/9"
+    ) == "elonmusk"
+    assert _twitter_account_from_url("https://example.com/whatever") is None
+
+
 # ── short-body + weak-title heuristic ──────────────────────────────
 
 

@@ -250,6 +250,37 @@ _OG_META_FALLBACK_NOT_FOUND_MARKERS = (
 )
 
 
+# Capture the `<account>` segment of a Twitter-style URL path:
+#   twitter.com/karpathy/status/123  →  "karpathy"
+#   x.com/karpathy/status/123        →  "karpathy"
+#   fxtwitter.com/karpathy/status/123→  "karpathy"
+# Used by the silent-corruption guard for fxtwitter URLs whose bogus IDs
+# get resolved to a real but unrelated tweet (e.g. /karpathy/status/1234567890
+# → a 2009 @pathfinderSport post in Greek).
+_TWITTER_URL_ACCOUNT_RE = re.compile(
+    r"(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com|nitter\.[\w.-]+|twiiit\.com)"
+    r"/([A-Za-z0-9_]+)/status/",
+    re.IGNORECASE,
+)
+
+# Capture the actual `@username` from og:title. Twitter and its mirrors all
+# format their og:title as something like "Display Name (@username)" or
+# "Display Name on X". We pull `@username` when present.
+_TWITTER_TITLE_ACCOUNT_RE = re.compile(r"\(@([A-Za-z0-9_]+)\)")
+
+
+def _twitter_account_from_url(url: str) -> str | None:
+    m = _TWITTER_URL_ACCOUNT_RE.search(url)
+    return m.group(1).lower() if m else None
+
+
+def _twitter_account_from_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    m = _TWITTER_TITLE_ACCOUNT_RE.search(title)
+    return m.group(1).lower() if m else None
+
+
 def _looks_like_challenge(
     text: str | None, title: str | None, html: str | None, *, url: str | None = None
 ) -> bool:
@@ -274,7 +305,9 @@ def _looks_like_challenge(
     # nitter return short structured pages by design — the body-length
     # heuristic would otherwise classify their valid responses as walls.
     # We do still check for the host's *own* 404 / deleted-tweet pages,
-    # since those would otherwise be saved as real docs.
+    # and for "wrong tweet served" silent-corruption cases (fxtwitter
+    # resolves bogus IDs to a real-but-unrelated tweet — caught 2026-06-16
+    # in queue e2e testing).
     if url:
         url_lower = url.lower()
         for trusted_host in _OG_META_FALLBACK_HOSTS:
@@ -284,6 +317,20 @@ def _looks_like_challenge(
                 for marker in _OG_META_FALLBACK_NOT_FOUND_MARKERS:
                     if marker in norm_title or marker in body_lower:
                         return True
+                # Cross-check the URL's intended account against the og:title's
+                # actual @username. If they disagree, the host returned a
+                # DIFFERENT tweet than the one requested — saving it would
+                # attribute someone else's words to the URL's account. Only
+                # fires when BOTH are extractable; if the title has no
+                # @username we can't compare, so we fall through.
+                url_account = _twitter_account_from_url(url)
+                title_account = _twitter_account_from_title(title)
+                if (
+                    url_account is not None
+                    and title_account is not None
+                    and url_account != title_account
+                ):
+                    return True
                 return False
 
     if html:
