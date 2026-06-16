@@ -42,8 +42,22 @@ def extract_youtube_id(url: str) -> str | None:
     return None
 
 
-_LINKEDIN_VIDEO_PATTERNS = [
-    re.compile(r"://(?:www\.)?linkedin\.com/posts/[^/]+.*\b(ugcPost|activity)\b"),
+# All LinkedIn URLs we route to the dedicated `extract_linkedin` extractor
+# instead of the general article extractor. The general one hits the login
+# wall and either saves it as garbage (pre-2026-06-14) or now rejects it
+# entirely (post the wall-detection commit). The LinkedIn extractor always
+# at least gets og:meta back, even for text/image posts where the body is
+# JS-rendered and unreachable.
+#
+# The original pattern set was video-only (it required `ugcPost`/`activity`
+# markers, which only appeared on legacy video URL shapes). Modern LinkedIn
+# share URLs look like
+#   /posts/<author-slug>_<title-slug>-share-<19-digit-activity-id>-<4chars>/
+# and don't contain those markers, so we now also match any /posts/ URL.
+# `extract_linkedin` already routes correctly internally: video posts go
+# through the transcript path, text/image posts fall through to og:meta stub.
+_LINKEDIN_PATTERNS = [
+    re.compile(r"://(?:www\.)?linkedin\.com/posts/"),
     re.compile(r"://(?:www\.)?linkedin\.com/feed/update/urn:li:(ugcPost|activity):\d+"),
     re.compile(r"://(?:www\.)?linkedin\.com/video/[^/]+"),
     re.compile(r"://(?:www\.)?linkedin\.com/embed/feed/update/urn:li:(ugcPost|activity):\d+"),
@@ -51,7 +65,7 @@ _LINKEDIN_VIDEO_PATTERNS = [
 
 
 def is_linkedin_url(url: str) -> bool:
-    return any(p.search(url) for p in _LINKEDIN_VIDEO_PATTERNS)
+    return any(p.search(url) for p in _LINKEDIN_PATTERNS)
 
 
 def _playwright_proxy_kwargs() -> dict | None:

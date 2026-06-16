@@ -27,6 +27,13 @@ class TestIsLinkedInUrl:
             "https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:1234567890",
             "https://www.linkedin.com/embed/feed/update/urn:li:activity:9876543210",
             "https://linkedin.com/posts/user_topic-activity-123456",
+            # Modern share URL pattern — no ugcPost/activity marker,
+            # uses share-<digits>-<short_code>. Hit during 2026-06-16
+            # capture of a Jake Saper post; was falling through to
+            # extract_article and saving an empty-body doc.
+            "https://www.linkedin.com/posts/jakesaper_i-have-spent-more-time-writing-about-ai-native-share-7469623060841742336-Ejx0/",
+            # Same shape, no query params
+            "https://www.linkedin.com/posts/someone_some-slug-share-1234567890123456789-aBcD/",
         ],
     )
     def test_valid_linkedin_urls(self, url: str):
