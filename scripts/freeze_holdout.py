@@ -1,8 +1,8 @@
 """Carve a stratified holdout from labeled.jsonl. ONE-SHOT.
 
 After running this once, you have:
-- src/ampersand_core/data/labeled.jsonl   training set
-- src/ampersand_core/data/holdout.jsonl   frozen eval set (never train on)
+- src/amperstand_core/data/labeled.jsonl   training set
+- src/amperstand_core/data/holdout.jsonl   frozen eval set (never train on)
 
 The retrain command evaluates every candidate model against holdout.jsonl
 and only promotes if accuracy doesn't regress. That's the load-bearing
@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = ROOT / "scripts" / "data" / "labeled.jsonl"
-DEFAULT_PACKAGE_DATA = ROOT / "src" / "ampersand_core" / "data"
+DEFAULT_PACKAGE_DATA = ROOT / "src" / "amperstand_core" / "data"
 
 
 def main() -> int:

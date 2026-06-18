@@ -1,9 +1,9 @@
-# Dockerfile for the Ampersand vault server.
+# Dockerfile for the Amperstand vault server.
 #
-# Build context is the ampersand-core repo root. With docker-compose.yml in
+# Build context is the amperstand-core repo root. With docker-compose.yml in
 # this directory, that means `build: { context: .., dockerfile: deploy/Dockerfile }`.
 #
-# Image is intentionally minimal — slim base + only what `ampersand-core` and
+# Image is intentionally minimal — slim base + only what `amperstand-core` and
 # its server runtime need. CLI and email-watch features live in the
 # bare-metal deploy (deploy/bootstrap.sh); the container is API-only.
 
@@ -20,7 +20,7 @@ RUN apt-get update \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/ampersand/ampersand-core
+WORKDIR /opt/amperstand/amperstand-core
 
 # Install deps first (dependency-only step caches well across source edits).
 COPY pyproject.toml ./
@@ -34,13 +34,13 @@ COPY src ./src
 RUN pip install -e .
 
 # Vault data and env live in volumes — see docker-compose.yml.
-ENV AMPERSAND_DATA_DIR=/var/lib/ampersand/vault
-VOLUME ["/var/lib/ampersand"]
+ENV AMPERSTAND_DATA_DIR=/var/lib/amperstand/vault
+VOLUME ["/var/lib/amperstand"]
 
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8765/health || exit 1
 
-CMD ["uvicorn", "ampersand_core.server.app:app", \
+CMD ["uvicorn", "amperstand_core.server.app:app", \
      "--host", "0.0.0.0", "--port", "8765", "--workers", "1"]

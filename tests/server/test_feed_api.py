@@ -6,18 +6,18 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ampersand_core.feed import FeedEntry, FeedInfo
+from amperstand_core.feed import FeedEntry, FeedInfo
 import sys
 
 # Importing the submodule registers it in sys.modules, but the package
 # __init__.py rebinds the name `router` to an APIRouter instance, which
 # shadows attribute-style access. Pull the module out by its dotted name.
-import ampersand_core.server.feed_api.router  # noqa: F401
-feed_router_mod = sys.modules["ampersand_core.server.feed_api.router"]
+import amperstand_core.server.feed_api.router  # noqa: F401
+feed_router_mod = sys.modules["amperstand_core.server.feed_api.router"]
 
-from ampersand_core.server.app import app, reset_job_store_cache
-from ampersand_core.server.feed_api.router import reset_registry_cache
-from ampersand_core.server.vault_api.store_factory import reset_store_cache
+from amperstand_core.server.app import app, reset_job_store_cache
+from amperstand_core.server.feed_api.router import reset_registry_cache
+from amperstand_core.server.vault_api.store_factory import reset_store_cache
 
 
 HEAD = {"Authorization": "Bearer devkey"}
@@ -25,8 +25,8 @@ HEAD = {"Authorization": "Bearer devkey"}
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AMPERSTAND_API_KEY", "devkey")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
     reset_job_store_cache()
     reset_registry_cache()
@@ -50,7 +50,7 @@ def _fake_content(url: str, title: str):
     """Mimic ExtractedContent enough for to_markdown() + store.create()."""
     from types import SimpleNamespace
 
-    from ampersand_core.models import ContentType
+    from amperstand_core.models import ContentType
 
     return SimpleNamespace(
         title=title,

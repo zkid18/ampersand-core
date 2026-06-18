@@ -3,9 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ampersand-core"
+# PyPI distribution name. The bare `amperstand` was taken on PyPI by an
+# unrelated minimalistic-static-site-generator (Nathan Scott, 7 releases),
+# so we publish as `amperstand-core` instead. The full project rename to
+# Amperstand follows in a separate commit; this pyproject change is just
+# the PyPI surface.
+name = "amperstand-core"
 version = "0.2.0"
-description = "Ampersand engine — extraction, storage, search, and the HTTP server."
+description = "Amperstand engine — extraction, storage, search, and the HTTP server."
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
@@ -40,10 +45,10 @@ dev = [
 ]
 
 [project.scripts]
-ampersand-admin = "ampersand_core.server.admin_cli.cli:app"
+amperstand-admin = "amperstand_core.server.admin_cli.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ampersand_core"]
+packages = ["src/amperstand_core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

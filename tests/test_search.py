@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from ampersand_core.search import (
+from amperstand_core.search import (
     SearchError,
     SearchIndex,
     SearchIndexer,
     parse_sections,
 )
-from ampersand_core.search.parser import Section
-from ampersand_core.store import ChangeEvent, ChangeKind, MarkdownStore
+from amperstand_core.search.parser import Section
+from amperstand_core.store import ChangeEvent, ChangeKind, MarkdownStore
 
 
 # ── parse_sections ───────────────────────────────────────────────────
@@ -137,7 +137,7 @@ def _section(title: str | None, body: str, path: list[str] | None = None) -> Sec
 def test_upsert_and_search_round_trip(index: SearchIndex) -> None:
     index.upsert_doc_sections(
         "doc1",
-        [_section("Setup", "run pip install ampersand here")],
+        [_section("Setup", "run pip install amperstand here")],
     )
     results = index.search("pip install")
     assert len(results) == 1
@@ -356,7 +356,7 @@ def test_indexer_swallows_exceptions(
     _, indexer = store_and_indexer
     # Force the index to raise by closing it.
     indexer.index.close()
-    caplog.set_level(logging.ERROR, logger="ampersand_core.search.indexer")
+    caplog.set_level(logging.ERROR, logger="amperstand_core.search.indexer")
     # No raise even though the underlying call will fail.
     indexer.handle_change(
         ChangeEvent(

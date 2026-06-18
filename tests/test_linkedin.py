@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ampersand_core.extractor import is_linkedin_url
-from ampersand_core.linkedin import _parse_webvtt, extract_linkedin
-from ampersand_core.models import ContentType
+from amperstand_core.extractor import is_linkedin_url
+from amperstand_core.linkedin import _parse_webvtt, extract_linkedin
+from amperstand_core.models import ContentType
 
 
 # ── URL detection ────────────────────────────────────────────────────
@@ -59,9 +59,9 @@ class TestIsLinkedInUrl:
 
 
 class TestExtractLinkedIn:
-    @patch("ampersand_core.linkedin._transcribe_video")
-    @patch("ampersand_core.linkedin._download_video")
-    @patch("ampersand_core.linkedin._inspect_post")
+    @patch("amperstand_core.linkedin._transcribe_video")
+    @patch("amperstand_core.linkedin._download_video")
+    @patch("amperstand_core.linkedin._inspect_post")
     def test_full_pipeline_with_asr(self, mock_inspect, mock_download, mock_transcribe):
         """Video URL found, no captions — falls back to ASR."""
         mock_inspect.return_value = (
@@ -88,8 +88,8 @@ class TestExtractLinkedIn:
         mock_download.assert_called_once()
         mock_transcribe.assert_called_once()
 
-    @patch("ampersand_core.linkedin._fetch_captions")
-    @patch("ampersand_core.linkedin._inspect_post")
+    @patch("amperstand_core.linkedin._fetch_captions")
+    @patch("amperstand_core.linkedin._inspect_post")
     def test_full_pipeline_with_captions(self, mock_inspect, mock_fetch_captions):
         """Captions URL found — uses captions, skips ASR."""
         mock_inspect.return_value = (
@@ -111,9 +111,9 @@ class TestExtractLinkedIn:
 
 
 class TestNoTranscript:
-    @patch("ampersand_core.linkedin._transcribe_video")
-    @patch("ampersand_core.linkedin._download_video")
-    @patch("ampersand_core.linkedin._inspect_post")
+    @patch("amperstand_core.linkedin._transcribe_video")
+    @patch("amperstand_core.linkedin._download_video")
+    @patch("amperstand_core.linkedin._inspect_post")
     def test_empty_transcript_fallback(self, mock_inspect, mock_download, mock_transcribe):
         mock_inspect.return_value = (
             "https://dms.licdn.com/playlist/vid/v2/xxx/mp4-720p/0/123",
@@ -136,7 +136,7 @@ class TestNoTranscript:
 class TestTextPostStub:
     """No video stream — fall back to og:meta stub instead of raising 422."""
 
-    @patch("ampersand_core.linkedin._inspect_post")
+    @patch("amperstand_core.linkedin._inspect_post")
     def test_text_post_with_description(self, mock_inspect):
         mock_inspect.return_value = (
             None,  # no video
@@ -156,7 +156,7 @@ class TestTextPostStub:
         assert "business in Brazil" in result.content_markdown
         assert "## Transcript" not in result.content_markdown
 
-    @patch("ampersand_core.linkedin._inspect_post")
+    @patch("amperstand_core.linkedin._inspect_post")
     def test_text_post_no_description_falls_back_to_hint(self, mock_inspect):
         mock_inspect.return_value = (None, None, "LinkedIn post", None, None)
 

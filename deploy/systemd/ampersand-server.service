@@ -1,15 +1,15 @@
 [Unit]
-Description=Ampersand vault server (uvicorn)
+Description=Amperstand vault server (uvicorn)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=ampersand
-Group=ampersand
-WorkingDirectory=/opt/ampersand
-EnvironmentFile=/etc/ampersand/env
-ExecStart=/opt/ampersand/venv/bin/uvicorn ampersand_core.server.app:app \
+User=amperstand
+Group=amperstand
+WorkingDirectory=/opt/amperstand
+EnvironmentFile=/etc/amperstand/env
+ExecStart=/opt/amperstand/venv/bin/uvicorn amperstand_core.server.app:app \
           --host 127.0.0.1 \
           --port 8765 \
           --log-level info \
@@ -28,7 +28,7 @@ PrivateDevices=true
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-ReadWritePaths=/var/lib/ampersand
+ReadWritePaths=/var/lib/amperstand
 
 [Install]
 WantedBy=multi-user.target

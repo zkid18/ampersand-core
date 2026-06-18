@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from ampersand_core.backend import (
+from amperstand_core.backend import (
     BackendError,
     HTTPBackend,
     StoreBackend,

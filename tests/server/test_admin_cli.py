@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ampersand_core.store import MarkdownStore
+from amperstand_core.store import MarkdownStore
 
-from ampersand_core.server.admin_cli.cli import app
+from amperstand_core.server.admin_cli.cli import app
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import time
 
     data_dir = tmp_path / "vault"
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(data_dir))
-    monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("AMPERSTAND_API_KEY", "devkey")
     s = MarkdownStore(data_dir)
     s.create("# one\n\nbody one\n", {"title": "First"})
     time.sleep(1)  # bump timestamps so oldest/newest pick different docs
@@ -47,8 +47,8 @@ def test_stats_when_data_dir_missing(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     missing = tmp_path / "nope"
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(missing))
-    monkeypatch.delenv("AMPERSAND_API_KEY", raising=False)
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(missing))
+    monkeypatch.delenv("AMPERSTAND_API_KEY", raising=False)
     r = runner.invoke(app, ["stats", "--env-file", str(tmp_path / "missing.env")])
     assert r.exit_code == 0, r.stdout
     assert "data dir does not exist" in r.stdout
@@ -62,15 +62,15 @@ def test_rotate_key_dry_run_writes_nothing(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env_file = tmp_path / "env"
-    env_file.write_text("AMPERSAND_API_KEY=oldkey\n", encoding="utf-8")
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path / "vault"))
+    env_file.write_text("AMPERSTAND_API_KEY=oldkey\n", encoding="utf-8")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path / "vault"))
 
     r = runner.invoke(
         app, ["rotate-key", "--env-file", str(env_file), "--dry-run"]
     )
     assert r.exit_code == 0, r.stdout
     assert "dry-run" in r.stdout
-    assert env_file.read_text(encoding="utf-8") == "AMPERSAND_API_KEY=oldkey\n"
+    assert env_file.read_text(encoding="utf-8") == "AMPERSTAND_API_KEY=oldkey\n"
 
 
 def test_rotate_key_writes_new_key_and_preserves_other_keys(
@@ -78,7 +78,7 @@ def test_rotate_key_writes_new_key_and_preserves_other_keys(
 ) -> None:
     env_file = tmp_path / "env"
     env_file.write_text(
-        "AMPERSAND_API_KEY=oldkey\nAMPERSAND_DATA_DIR=/var/lib/ampersand/vault\n",
+        "AMPERSTAND_API_KEY=oldkey\nAMPERSTAND_DATA_DIR=/var/lib/amperstand/vault\n",
         encoding="utf-8",
     )
 
@@ -86,9 +86,9 @@ def test_rotate_key_writes_new_key_and_preserves_other_keys(
     assert r.exit_code == 0, r.stdout
 
     new_text = env_file.read_text(encoding="utf-8")
-    assert "AMPERSAND_DATA_DIR=/var/lib/ampersand/vault" in new_text
+    assert "AMPERSTAND_DATA_DIR=/var/lib/amperstand/vault" in new_text
     assert "oldkey" not in new_text
-    new_key_lines = [l for l in new_text.splitlines() if l.startswith("AMPERSAND_API_KEY=")]
+    new_key_lines = [l for l in new_text.splitlines() if l.startswith("AMPERSTAND_API_KEY=")]
     assert len(new_key_lines) == 1
     new_key = new_key_lines[0].split("=", 1)[1]
     assert len(new_key) == 64  # 32 bytes hex
@@ -102,8 +102,8 @@ def test_rotate_key_writes_new_key_and_preserves_other_keys(
 def test_rotate_key_requires_env_file(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # If neither --env-file nor the default /etc/ampersand/env exists, error out.
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path / "vault"))
+    # If neither --env-file nor the default /etc/amperstand/env exists, error out.
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path / "vault"))
     fake_env = tmp_path / "no-such-env"
     r = runner.invoke(app, ["rotate-key", "--env-file", str(fake_env)])
     # The CLI happily creates the file at the chosen path → success is acceptable.

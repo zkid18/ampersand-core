@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ampersand_core.extractor import _looks_like_challenge
+from amperstand_core.extractor import _looks_like_challenge
 
 
 # ── HTML structural markers (language-agnostic) ────────────────────
@@ -232,7 +232,7 @@ def test_fxtwitter_title_without_username_falls_through() -> None:
 
 
 def test_twitter_url_account_extraction_is_case_insensitive() -> None:
-    from ampersand_core.extractor import _twitter_account_from_url
+    from amperstand_core.extractor import _twitter_account_from_url
     assert _twitter_account_from_url(
         "https://X.com/Karpathy/status/1234567890"
     ) == "karpathy"
@@ -252,7 +252,7 @@ def test_twitter_url_account_extraction_is_case_insensitive() -> None:
 def test_pick_best_title_prefers_trafilatura_when_it_matches_body() -> None:
     """Happy path — trafilatura's heading is the actual article title and
     appears in the body. Keep it."""
-    from ampersand_core.extractor import _pick_best_title
+    from amperstand_core.extractor import _pick_best_title
     traf = "Diseconomies of Scale"
     og = "Diseconomies of Scale"
     body = "# Diseconomies of Scale\n\nLong-form article about how companies..."
@@ -263,7 +263,7 @@ def test_pick_best_title_falls_back_to_og_when_traf_title_isnt_in_body() -> None
     """The Dan Luu case: trafilatura picked an appendix heading from another
     post; that title's words don't appear in the body. og:title is what
     we should save."""
-    from ampersand_core.extractor import _pick_best_title
+    from amperstand_core.extractor import _pick_best_title
     traf = "Appendix: techniques that only work at small scale"
     og = "Keyboard latency"
     body = (
@@ -275,7 +275,7 @@ def test_pick_best_title_falls_back_to_og_when_traf_title_isnt_in_body() -> None
 
 
 def test_pick_best_title_falls_back_to_html_title_when_no_og() -> None:
-    from ampersand_core.extractor import _pick_best_title
+    from amperstand_core.extractor import _pick_best_title
     traf = "Some Sidebar Heading"
     body = "Article body about completely different things"
     assert _pick_best_title(traf, None, "Real Page Title", body) == "Real Page Title"
@@ -285,12 +285,12 @@ def test_pick_best_title_keeps_traf_when_no_alternatives_even_if_bodyless() -> N
     """Last-resort: if og:title and <title> are both absent, return
     trafilatura's pick even when it doesn't appear in the body. Better than
     None — caller can still decide to reject elsewhere."""
-    from ampersand_core.extractor import _pick_best_title
+    from amperstand_core.extractor import _pick_best_title
     assert _pick_best_title("Whatever Title", None, None, "Unrelated body") == "Whatever Title"
 
 
 def test_extract_og_title_handles_attribute_order_and_entities() -> None:
-    from ampersand_core.extractor import _extract_og_title
+    from amperstand_core.extractor import _extract_og_title
     # Normal order
     html1 = '<meta property="og:title" content="It&#39;s a Test &amp; More">'
     assert _extract_og_title(html1) == "It's a Test & More"
@@ -302,7 +302,7 @@ def test_extract_og_title_handles_attribute_order_and_entities() -> None:
 
 
 def test_title_in_body_is_robust_to_punctuation_and_case() -> None:
-    from ampersand_core.extractor import _title_appears_in_body
+    from amperstand_core.extractor import _title_appears_in_body
     assert _title_appears_in_body(
         "Diseconomies of Scale",
         "Some intro\n# Diseconomies of scale (a brief look)\n\nDetails",

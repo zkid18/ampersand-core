@@ -17,8 +17,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from ampersand_core.store import MarkdownStore
-from ampersand_core.store import frontmatter as fm
+from amperstand_core.store import MarkdownStore
+from amperstand_core.store import frontmatter as fm
 
 
 def main() -> int:

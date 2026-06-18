@@ -1,9 +1,9 @@
-# docker-compose.yml — Ampersand server + Caddy on one box.
+# docker-compose.yml — Amperstand server + Caddy on one box.
 #
 # Quick start:
 #   cd deploy
-#   # Generate AMPERSAND_API_KEY into .env (one time):
-#   echo "AMPERSAND_API_KEY=$(openssl rand -hex 32)" > .env
+#   # Generate AMPERSTAND_API_KEY into .env (one time):
+#   echo "AMPERSTAND_API_KEY=$(openssl rand -hex 32)" > .env
 #   # Optional, for /chat + semantic + hybrid search:
 #   echo "OPENAI_API_KEY=sk-..." >> .env
 #   docker compose up -d
@@ -11,7 +11,7 @@
 #
 # Then hit:
 #   curl http://localhost/health                                          (via Caddy)
-#   curl -H "Authorization: Bearer $AMPERSAND_API_KEY" http://localhost/vault
+#   curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" http://localhost/vault
 #
 # What's NOT here:
 #   - Telegram bot, browser extension, email-watch, vault-watcher, feed-sync.
@@ -24,24 +24,24 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    container_name: ampersand-server
+    container_name: amperstand-server
     restart: unless-stopped
     environment:
-      AMPERSAND_API_KEY: ${AMPERSAND_API_KEY:?set AMPERSAND_API_KEY in .env}
-      AMPERSAND_DATA_DIR: /var/lib/ampersand/vault
+      AMPERSTAND_API_KEY: ${AMPERSTAND_API_KEY:?set AMPERSTAND_API_KEY in .env}
+      AMPERSTAND_DATA_DIR: /var/lib/amperstand/vault
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AMPERSAND_HTTP_PROXY: ${AMPERSAND_HTTP_PROXY:-}
-      AMPERSAND_YOUTUBE_AUDIO_FALLBACK: ${AMPERSAND_YOUTUBE_AUDIO_FALLBACK:-}
+      AMPERSTAND_HTTP_PROXY: ${AMPERSTAND_HTTP_PROXY:-}
+      AMPERSTAND_YOUTUBE_AUDIO_FALLBACK: ${AMPERSTAND_YOUTUBE_AUDIO_FALLBACK:-}
     volumes:
-      - vault:/var/lib/ampersand
+      - vault:/var/lib/amperstand
     expose:
       - "8765"
     networks:
-      - ampersand
+      - amperstand
 
   caddy:
     image: caddy:2-alpine
-    container_name: ampersand-caddy
+    container_name: amperstand-caddy
     restart: unless-stopped
     depends_on:
       - server
@@ -53,7 +53,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      - ampersand
+      - amperstand
 
 volumes:
   vault:
@@ -61,4 +61,4 @@ volumes:
   caddy_config:
 
 networks:
-  ampersand:
+  amperstand:

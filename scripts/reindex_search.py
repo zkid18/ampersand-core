@@ -4,9 +4,9 @@ Runs on the droplet against the same data dir the server uses. Safe to run
 while the server is up — SQLite WAL mode handles concurrent reads.
 
 Usage:
-    sudo -u ampersand /opt/ampersand/venv/bin/python3 \
-        /opt/ampersand/ampersand-server/scripts/reindex_search.py \
-        --root /var/lib/ampersand/vault
+    sudo -u amperstand /opt/amperstand/venv/bin/python3 \
+        /opt/amperstand/amperstand-server/scripts/reindex_search.py \
+        --root /var/lib/amperstand/vault
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ import sys
 import time
 from pathlib import Path
 
-from ampersand_core.search import SearchIndex, SearchIndexer
-from ampersand_core.store import MarkdownStore
+from amperstand_core.search import SearchIndex, SearchIndexer
+from amperstand_core.store import MarkdownStore
 
 
 def main() -> int:

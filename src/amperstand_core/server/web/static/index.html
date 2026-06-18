@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amperstand Vault</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand">Vault</a>
+    <nav class="tabs">
+      <a href="#/" data-tab="updated">Updated</a>
+      <a href="#/added" data-tab="added">Added</a>
+    </nav>
+    <form id="searchForm" class="search">
+      <input type="search" id="q" placeholder="search the vault…" autocomplete="off">
+    </form>
+    <button id="logout" type="button" title="forget the saved API key">⎋</button>
+  </header>
+  <main id="root">
+    <p class="muted">loading…</p>
+  </main>
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>

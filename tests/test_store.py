@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ampersand_core.store import (
+from amperstand_core.store import (
     ChangeEvent,
     ChangeKind,
     Conflict,
@@ -14,7 +14,7 @@ from ampersand_core.store import (
     NotFound,
     StoreError,
 )
-from ampersand_core.store import frontmatter
+from amperstand_core.store import frontmatter
 
 
 def make_store(tmp_path: Path) -> MarkdownStore:
@@ -252,7 +252,7 @@ def test_get_invalid_id_returns_not_found(tmp_path: Path) -> None:
 
 
 def test_upsert_creates_when_missing(tmp_path: Path) -> None:
-    from ampersand_core.store.ids import new_id
+    from amperstand_core.store.ids import new_id
 
     s = make_store(tmp_path)
     new = new_id()
@@ -270,7 +270,7 @@ def test_extra_frontmatter_keys_round_trip(tmp_path: Path) -> None:
 
 
 def test_recompute_hash_matches_stored(tmp_path: Path) -> None:
-    from ampersand_core.store import recompute_hash
+    from amperstand_core.store import recompute_hash
 
     s = make_store(tmp_path)
     doc = s.create("# body\n\nstuff\n", {"title": "T", "tags": ["x"]})
@@ -279,7 +279,7 @@ def test_recompute_hash_matches_stored(tmp_path: Path) -> None:
 
 
 def test_recompute_hash_detects_tamper(tmp_path: Path) -> None:
-    from ampersand_core.store import recompute_hash
+    from amperstand_core.store import recompute_hash
 
     s = make_store(tmp_path)
     doc = s.create("v1\n", {"title": "T"})

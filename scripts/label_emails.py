@@ -8,7 +8,7 @@ ready for scripts/train_classifier.py.
   scripts/label_emails.py --n 500 --out scripts/data/labeled.jsonl
 
 Env:
-  AMPERSAND_API_KEY  (vault auth)
+  AMPERSTAND_API_KEY  (vault auth)
   OPENAI_API_KEY     (judge)
 """
 
@@ -115,10 +115,10 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
-    vault_key = os.environ.get("AMPERSAND_API_KEY")
+    vault_key = os.environ.get("AMPERSTAND_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     if not vault_key:
-        print("error: AMPERSAND_API_KEY not set", file=sys.stderr)
+        print("error: AMPERSTAND_API_KEY not set", file=sys.stderr)
         return 1
     if not openai_key:
         print("error: OPENAI_API_KEY not set", file=sys.stderr)

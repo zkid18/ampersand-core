@@ -1,6 +1,6 @@
 """Watch the vault dir for direct file changes and keep FTS5 in sync.
 
-Runs alongside ampersand-server when files in /var/lib/ampersand/vault/docs are
+Runs alongside amperstand-server when files in /var/lib/amperstand/vault/docs are
 edited *outside* the API path — e.g. when an Obsidian client mounts the dir
 over sshfs and writes directly. Also keeps the .store/by-id/ index up to date.
 
@@ -12,7 +12,7 @@ Triggers:
 Files without an `id:` frontmatter field are skipped (no doc_id to reference).
 
 Usage:
-    /opt/ampersand/venv/bin/python3 scripts/vault_watcher.py /var/lib/ampersand/vault
+    /opt/amperstand/venv/bin/python3 scripts/vault_watcher.py /var/lib/amperstand/vault
 """
 
 from __future__ import annotations
@@ -27,14 +27,14 @@ from threading import Timer
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from ampersand_core.search import SearchIndex
-from ampersand_core.search.parser import parse_sections
-from ampersand_core.store import frontmatter as fm
-from ampersand_core.store import paths as store_paths
-from ampersand_core.store.meta_index import MetaIndex
-from ampersand_core.store.store import _meta_from_frontmatter
+from amperstand_core.search import SearchIndex
+from amperstand_core.search.parser import parse_sections
+from amperstand_core.store import frontmatter as fm
+from amperstand_core.store import paths as store_paths
+from amperstand_core.store.meta_index import MetaIndex
+from amperstand_core.store.store import _meta_from_frontmatter
 
-log = logging.getLogger("ampersand-vault-watcher")
+log = logging.getLogger("amperstand-vault-watcher")
 
 DEBOUNCE_SEC = 1.5  # collapse rapid events from atomic-save sequences
 
@@ -175,7 +175,7 @@ def main() -> int:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/var/lib/ampersand/vault")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/var/lib/amperstand/vault")
     docs_dir = root / "docs"
     if not docs_dir.exists():
         log.error("docs dir does not exist: %s", docs_dir)

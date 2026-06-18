@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from ampersand_core.store import MarkdownStore, paths
-from ampersand_core.store.meta_index import MetaIndex, row_to_kwargs
+from amperstand_core.store import MarkdownStore, paths
+from amperstand_core.store.meta_index import MetaIndex, row_to_kwargs
 
 
 def test_upsert_and_list_rows(tmp_path: Path) -> None:

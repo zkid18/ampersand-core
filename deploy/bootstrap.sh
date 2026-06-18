@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# bootstrap.sh — one-command setup for an Ampersand vault droplet.
+# bootstrap.sh — one-command setup for an Amperstand vault droplet.
 #
 # Run as root on a fresh Ubuntu 22.04+ box. Re-running is safe — every step
 # checks before doing.
 #
-#   git clone https://github.com/zkid18/ampersand-core /opt/ampersand/ampersand-core
-#   cd /opt/ampersand/ampersand-core
+#   git clone https://github.com/zkid18/amperstand-core /opt/amperstand/amperstand-core
+#   cd /opt/amperstand/amperstand-core
 #   sudo bash deploy/bootstrap.sh
 #
 # What this does (in order):
 #   1. apt install python3, caddy, ufw, etc.
-#   2. Create the `ampersand` system user.
-#   3. Generate AMPERSAND_API_KEY (or keep existing).
+#   2. Create the `amperstand` system user.
+#   3. Generate AMPERSTAND_API_KEY (or keep existing).
 #   4. Optionally prompt for OPENAI_API_KEY (Enter to skip).
-#   5. Clone the ampersand CLI from GitHub (if absent).
-#   6. Build venv, install ampersand-core + ampersand CLI editable.
+#   5. Clone the amperstand CLI from GitHub (if absent).
+#   6. Build venv, install amperstand-core + amperstand CLI editable.
 #   7. Install + enable systemd units (server, vault-watcher, feed-sync.timer).
 #      Email-watch unit is installed but stays disabled until you run
-#      `sudo -u ampersand ampersand email setup` to configure IMAP creds.
+#      `sudo -u amperstand amperstand email setup` to configure IMAP creds.
 #   8. Configure Caddy (http-only by default; bundled Caddyfile.tls for later).
 #   9. Open ports 22/80/443 in UFW.
-#  10. Start ampersand-server, wait for /health, print summary.
+#  10. Start amperstand-server, wait for /health, print summary.
 
 set -euo pipefail
 
-REPO_ROOT="${REPO_ROOT:-/opt/ampersand}"
-CORE_REPO="${REPO_ROOT}/ampersand-core"
-CLI_REPO="${REPO_ROOT}/ampersand"
-SERVICE_USER="ampersand"
-DATA_DIR="/var/lib/ampersand/vault"
-ENV_FILE="/etc/ampersand/env"
+REPO_ROOT="${REPO_ROOT:-/opt/amperstand}"
+CORE_REPO="${REPO_ROOT}/amperstand-core"
+CLI_REPO="${REPO_ROOT}/amperstand"
+SERVICE_USER="amperstand"
+DATA_DIR="/var/lib/amperstand/vault"
+ENV_FILE="/etc/amperstand/env"
 VENV_DIR="${REPO_ROOT}/venv"
 PORT="${PORT:-8765}"
-CLI_REPO_URL="${CLI_REPO_URL:-https://github.com/zkid18/ampersand.git}"
+CLI_REPO_URL="${CLI_REPO_URL:-https://github.com/zkid18/amperstand.git}"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "error: must run as root (try: sudo bash $0)" >&2
@@ -61,7 +61,7 @@ fi
 echo "==> Creating service user '${SERVICE_USER}' (if absent)"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     useradd --system --create-home --shell /usr/sbin/nologin \
-        --home-dir /var/lib/ampersand "$SERVICE_USER"
+        --home-dir /var/lib/amperstand "$SERVICE_USER"
 fi
 
 # ── 3. data dir ────────────────────────────────────────────────────
@@ -70,22 +70,22 @@ echo "==> Preparing data dir ${DATA_DIR}"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$(dirname "$DATA_DIR")"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$DATA_DIR"
 
-# ── 4. env file (AMPERSAND_API_KEY + optional OPENAI_API_KEY) ──────
+# ── 4. env file (AMPERSTAND_API_KEY + optional OPENAI_API_KEY) ──────
 
 echo "==> Preparing env file ${ENV_FILE}"
-install -d -m 0750 -o root -g "$SERVICE_USER" /etc/ampersand
+install -d -m 0750 -o root -g "$SERVICE_USER" /etc/amperstand
 
 if [ ! -f "$ENV_FILE" ]; then
     KEY="$(openssl rand -hex 32)"
     cat > "$ENV_FILE" <<EOF
-AMPERSAND_API_KEY=${KEY}
-AMPERSAND_DATA_DIR=${DATA_DIR}
+AMPERSTAND_API_KEY=${KEY}
+AMPERSTAND_DATA_DIR=${DATA_DIR}
 EOF
     chmod 0640 "$ENV_FILE"
     chown root:"$SERVICE_USER" "$ENV_FILE"
     echo
     echo "    NEW API KEY GENERATED — store this somewhere safe NOW."
-    echo "    AMPERSAND_API_KEY=${KEY}"
+    echo "    AMPERSTAND_API_KEY=${KEY}"
     echo
 else
     echo "    env file already exists, leaving it alone"
@@ -115,34 +115,34 @@ if ! grep -q '^OPENAI_API_KEY=' "$ENV_FILE"; then
     fi
 fi
 
-# Pre-write the CLI's vault-backend config so `sudo -u ampersand ampersand …`
+# Pre-write the CLI's vault-backend config so `sudo -u amperstand amperstand …`
 # works out of the box. Without this, the very first command in the README
-# (`ampersand capture <url>`) errors with "no vault backend configured" because
+# (`amperstand capture <url>`) errors with "no vault backend configured" because
 # the CLI doesn't know it should talk to the local server. The file goes into
-# the ampersand user's home (~/.ampersand/config.json) and points at loopback
+# the amperstand user's home (~/.amperstand/config.json) and points at loopback
 # + reads the API key from the env file that systemd loads.
 echo "==> Writing CLI vault-backend config for ${SERVICE_USER}"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 \
-    /var/lib/ampersand/.ampersand
-cat > /var/lib/ampersand/.ampersand/config.json <<EOF
+    /var/lib/amperstand/.amperstand
+cat > /var/lib/amperstand/.amperstand/config.json <<EOF
 {
   "vault": {
     "backend": {
       "kind": "http",
       "http": {
         "url": "http://127.0.0.1:${PORT}",
-        "api_key_env": "AMPERSAND_API_KEY"
+        "api_key_env": "AMPERSTAND_API_KEY"
       }
     }
   }
 }
 EOF
-chown "$SERVICE_USER":"$SERVICE_USER" /var/lib/ampersand/.ampersand/config.json
-chmod 0600 /var/lib/ampersand/.ampersand/config.json
+chown "$SERVICE_USER":"$SERVICE_USER" /var/lib/amperstand/.amperstand/config.json
+chmod 0600 /var/lib/amperstand/.amperstand/config.json
 
 # ── 5. clone CLI repo ──────────────────────────────────────────────
 
-echo "==> Fetching ampersand CLI from ${CLI_REPO_URL}"
+echo "==> Fetching amperstand CLI from ${CLI_REPO_URL}"
 if [ ! -d "$CLI_REPO/.git" ]; then
     git clone --quiet "$CLI_REPO_URL" "$CLI_REPO"
 else
@@ -166,23 +166,23 @@ chown -R "${SERVICE_USER}":"${SERVICE_USER}" "${REPO_ROOT}"
 
 echo "==> Installing systemd units"
 for unit in \
-    ampersand-server.service \
-    ampersand-vault-watcher.service \
-    ampersand-feed-sync.service \
-    ampersand-feed-sync.timer \
-    ampersand-email-watch.service
+    amperstand-server.service \
+    amperstand-vault-watcher.service \
+    amperstand-feed-sync.service \
+    amperstand-feed-sync.timer \
+    amperstand-email-watch.service
 do
     install -m 0644 "${CORE_REPO}/deploy/systemd/${unit}" "/etc/systemd/system/${unit}"
 done
 systemctl daemon-reload
 
 echo "==> Enabling units (server, vault-watcher, feed-sync.timer)"
-systemctl enable ampersand-server.service
-systemctl enable ampersand-vault-watcher.service
-systemctl enable ampersand-feed-sync.timer
+systemctl enable amperstand-server.service
+systemctl enable amperstand-vault-watcher.service
+systemctl enable amperstand-feed-sync.timer
 
 # Email-watch deliberately left disabled — needs IMAP creds first.
-# User enables manually after running `ampersand email setup`.
+# User enables manually after running `amperstand email setup`.
 
 # ── 8. caddy ───────────────────────────────────────────────────────
 
@@ -206,10 +206,10 @@ ufw --force enable >/dev/null
 
 # ── 10. start + verify ─────────────────────────────────────────────
 
-echo "==> Starting ampersand-server"
-systemctl restart ampersand-server.service
-systemctl start ampersand-vault-watcher.service
-systemctl start ampersand-feed-sync.timer
+echo "==> Starting amperstand-server"
+systemctl restart amperstand-server.service
+systemctl start amperstand-vault-watcher.service
+systemctl start amperstand-feed-sync.timer
 
 echo "==> Waiting for /health (up to 30s)"
 for i in $(seq 1 30); do
@@ -219,7 +219,7 @@ for i in $(seq 1 30); do
     fi
     sleep 1
     if [ "$i" = "30" ]; then
-        echo "    /health didn't come up in 30s — check: sudo journalctl -u ampersand-server -n 50"
+        echo "    /health didn't come up in 30s — check: sudo journalctl -u amperstand-server -n 50"
         exit 1
     fi
 done
@@ -229,13 +229,13 @@ echo "✓ Bootstrap complete."
 echo
 echo "  Public URL:  http://$(curl -fsS https://ipv4.icanhazip.com 2>/dev/null || echo "this-droplet"):80/health"
 echo "  Local:       curl -s http://127.0.0.1:${PORT}/health"
-echo "  Logs:        sudo journalctl -u ampersand-server -f"
-echo "  Admin:       sudo -u ${SERVICE_USER} ${VENV_DIR}/bin/ampersand-admin stats"
+echo "  Logs:        sudo journalctl -u amperstand-server -f"
+echo "  Admin:       sudo -u ${SERVICE_USER} ${VENV_DIR}/bin/amperstand-admin stats"
 echo
 echo "  Optional:"
 echo "    Email watcher (newsletters → vault):"
-echo "      sudo -u ${SERVICE_USER} ${VENV_DIR}/bin/ampersand email setup"
-echo "      sudo systemctl enable --now ampersand-email-watch"
+echo "      sudo -u ${SERVICE_USER} ${VENV_DIR}/bin/amperstand email setup"
+echo "      sudo systemctl enable --now amperstand-email-watch"
 echo
 echo "    TLS / domain (when you have one):"
 echo "      sudo cp ${CORE_REPO}/deploy/Caddyfile.tls /etc/caddy/Caddyfile"

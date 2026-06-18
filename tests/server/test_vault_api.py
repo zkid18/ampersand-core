@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ampersand_core.server.app import app, reset_job_store_cache
-from ampersand_core.server.vault_api.store_factory import reset_store_cache
+from amperstand_core.server.app import app, reset_job_store_cache
+from amperstand_core.server.vault_api.store_factory import reset_store_cache
 
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AMPERSTAND_API_KEY", "devkey")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
     reset_job_store_cache()
     # `with` here triggers lifespan startup/shutdown — needed so the
@@ -171,7 +171,7 @@ def test_capture_html_falls_back_to_html_when_no_transcript(
 ) -> None:
     """When extract_youtube can't get a transcript, /capture/html should
     use the supplied HTML to grab the description instead of saving a stub."""
-    from ampersand_core.youtube import YouTubeTranscriptUnavailable
+    from amperstand_core.youtube import YouTubeTranscriptUnavailable
 
     def fake_yt(url: str):
         raise YouTubeTranscriptUnavailable(
@@ -179,7 +179,7 @@ def test_capture_html_falls_back_to_html_when_no_transcript(
             channel_url="https://youtube.com/@x",
         )
 
-    import ampersand_core.server.app as app_mod
+    import amperstand_core.server.app as app_mod
     monkeypatch.setattr(app_mod, "extract_youtube", fake_yt)
 
     # Real YouTube watch pages render the description in JS-only DOM, but
@@ -225,7 +225,7 @@ def test_capture_url_returns_422_when_no_transcript(
 ) -> None:
     """The bot/CLI hitting /capture (URL only, no HTML) gets 422 when
     transcript isn't available — there's no HTML to fall back to."""
-    from ampersand_core.youtube import YouTubeTranscriptUnavailable
+    from amperstand_core.youtube import YouTubeTranscriptUnavailable
 
     def fake_yt(url: str):
         raise YouTubeTranscriptUnavailable(
@@ -233,7 +233,7 @@ def test_capture_url_returns_422_when_no_transcript(
             channel_url=None,
         )
 
-    import ampersand_core.server.app as app_mod
+    import amperstand_core.server.app as app_mod
     monkeypatch.setattr(app_mod, "extract_youtube", fake_yt)
 
     r = client.post(
@@ -249,7 +249,7 @@ def test_capture_html_routes_youtube_to_youtube_extractor(
 ) -> None:
     """A YouTube URL with arbitrary page HTML must dispatch to extract_youtube,
     not to the trafilatura HTML pipeline — the transcript is canonical."""
-    from ampersand_core.models import CapturedContent, ContentType
+    from amperstand_core.models import CapturedContent, ContentType
 
     seen = {}
 
@@ -262,7 +262,7 @@ def test_capture_html_routes_youtube_to_youtube_extractor(
             content_type=ContentType.VIDEO,
         )
 
-    import ampersand_core.server.app as app_mod
+    import amperstand_core.server.app as app_mod
     monkeypatch.setattr(app_mod, "extract_youtube", fake_youtube)
 
     r = client.post(
@@ -292,8 +292,8 @@ def test_wrong_api_key_is_rejected(client: TestClient) -> None:
 
 
 def test_vault_503_when_api_key_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("AMPERSAND_API_KEY", raising=False)
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("AMPERSTAND_API_KEY", raising=False)
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
     c = TestClient(app)
     r = c.get("/vault", headers={"Authorization": "Bearer anything"})
@@ -302,7 +302,7 @@ def test_vault_503_when_api_key_unset(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_health_open_even_without_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AMPERSAND_API_KEY", raising=False)
+    monkeypatch.delenv("AMPERSTAND_API_KEY", raising=False)
     c = TestClient(app)
     assert c.get("/health").status_code == 200
 
@@ -451,7 +451,7 @@ def test_search_returns_ranked_section_results(client: TestClient) -> None:
         "/vault",
         headers=HEAD,
         json={
-            "body": "# Setup\n\n## Install\n\nrun pip install ampersand here\n\n## Config\n\nset BAR=baz\n",
+            "body": "# Setup\n\n## Install\n\nrun pip install amperstand here\n\n## Config\n\nset BAR=baz\n",
             "frontmatter": {"title": "Project"},
         },
     )
@@ -625,21 +625,21 @@ def test_worker_count_helper_reads_env_with_defaults_and_clamps(
 ) -> None:
     """Concurrent-workers knob: default 1, env-overridable, clamped to [1, 8]
     so an operator can't accidentally fork-bomb the box."""
-    from ampersand_core.server.app import _worker_count
+    from amperstand_core.server.app import _worker_count
 
-    monkeypatch.delenv("AMPERSAND_CAPTURE_WORKERS", raising=False)
+    monkeypatch.delenv("AMPERSTAND_CAPTURE_WORKERS", raising=False)
     assert _worker_count() == 1
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "4")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_WORKERS", "4")
     assert _worker_count() == 4
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "0")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_WORKERS", "0")
     assert _worker_count() == 1  # clamped up
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "100")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_WORKERS", "100")
     assert _worker_count() == 8  # clamped down
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_WORKERS", "garbage")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_WORKERS", "garbage")
     assert _worker_count() == 1  # parse fallback
 
 
@@ -650,7 +650,7 @@ def test_job_store_claim_next_is_atomic_under_concurrency(
     same job. JobStore relies on a per-instance write lock + the WHERE status
     guard on the UPDATE — this is the contract concurrent workers depend on."""
     import threading
-    from ampersand_core.server.capture_jobs import JobStore, STATUS_DONE
+    from amperstand_core.server.capture_jobs import JobStore, STATUS_DONE
 
     store = JobStore(tmp_path / "jobs.db")
     ids = [
@@ -684,21 +684,21 @@ def test_job_timeout_helper_reads_env_with_defaults_and_clamps(
     """F2: the per-job timeout helper must default sensibly, accept env
     overrides, and clamp absurd values. The worker's wait_for wrapper is
     stdlib behavior we don't need to retest — but the budget knob is ours."""
-    from ampersand_core.server.app import _job_timeout_s
+    from amperstand_core.server.app import _job_timeout_s
 
-    monkeypatch.delenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("AMPERSTAND_CAPTURE_JOB_TIMEOUT_S", raising=False)
     assert _job_timeout_s() == 90.0  # default
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "30")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_JOB_TIMEOUT_S", "30")
     assert _job_timeout_s() == 30.0
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "1")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_JOB_TIMEOUT_S", "1")
     assert _job_timeout_s() == 10.0  # clamped up
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "9999")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_JOB_TIMEOUT_S", "9999")
     assert _job_timeout_s() == 600.0  # clamped down
 
-    monkeypatch.setenv("AMPERSAND_CAPTURE_JOB_TIMEOUT_S", "garbage")
+    monkeypatch.setenv("AMPERSTAND_CAPTURE_JOB_TIMEOUT_S", "garbage")
     assert _job_timeout_s() == 90.0  # falls back on parse error
 
 
@@ -784,11 +784,11 @@ def test_worker_drains_a_capture_html_job(client: TestClient) -> None:
 def test_openapi_includes_vault_routes_when_docs_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ampersand_core.server.app import create_app
-    from ampersand_core.server.vault_api.store_factory import reset_store_cache
+    from amperstand_core.server.app import create_app
+    from amperstand_core.server.vault_api.store_factory import reset_store_cache
 
-    monkeypatch.setenv("AMPERSAND_API_KEY", "devkey")
-    monkeypatch.setenv("AMPERSAND_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AMPERSTAND_API_KEY", "devkey")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path))
     reset_store_cache()
     app2 = create_app(docs_visible=True)
     c = TestClient(app2)

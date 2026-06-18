@@ -10,16 +10,16 @@ state file so re-running the script doesn't create duplicates.
 
 Usage:
     # On the droplet, write directly into the local store:
-    sudo -u ampersand /opt/ampersand/venv/bin/python3 \
-        /opt/ampersand/ampersand-server/scripts/migrate_local_vault.py \
+    sudo -u amperstand /opt/amperstand/venv/bin/python3 \
+        /opt/amperstand/amperstand-server/scripts/migrate_local_vault.py \
         --src /tmp/legacy-vault \
-        --kind store --path /var/lib/ampersand/vault \
-        --state /var/lib/ampersand/migrate-state.json
+        --kind store --path /var/lib/amperstand/vault \
+        --state /var/lib/amperstand/migrate-state.json
 
     # From a Mac, push over HTTP:
     python3 migrate_local_vault.py \
-        --src ~/Documents/ampersand \
-        --kind http --url http://68.183.29.223 --api-key-env AMPERSAND_API_KEY \
+        --src ~/Documents/amperstand \
+        --kind http --url http://68.183.29.223 --api-key-env AMPERSTAND_API_KEY \
         --state /tmp/migrate-state.json
 """
 
@@ -35,7 +35,7 @@ from typing import Any
 
 import yaml
 
-from ampersand_core.backend import BackendError, build_backend
+from amperstand_core.backend import BackendError, build_backend
 
 
 def parse_md_file(path: Path) -> tuple[dict[str, Any], str]:

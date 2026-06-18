@@ -4,7 +4,7 @@ Inputs:
   scripts/data/labeled.jsonl   produced by scripts/label_emails.py
 
 Outputs:
-  src/ampersand_core/models/newsletter_classifier.joblib   trained pipeline
+  src/amperstand_core/models/newsletter_classifier.joblib   trained pipeline
   scripts/data/training_report.txt                          metrics dump
 
   scripts/train_classifier.py
@@ -29,9 +29,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 ROOT = Path(__file__).resolve().parent.parent
-PKG_DATA = ROOT / "src" / "ampersand_core" / "data"
+PKG_DATA = ROOT / "src" / "amperstand_core" / "data"
 DEFAULT_DATA = PKG_DATA / "labeled.jsonl"
-DEFAULT_MODEL = ROOT / "src" / "ampersand_core" / "models" / "newsletter_classifier.joblib"
+DEFAULT_MODEL = ROOT / "src" / "amperstand_core" / "models" / "newsletter_classifier.joblib"
 DEFAULT_REPORT = ROOT / "scripts" / "data" / "training_report.txt"
 
 # Body chars used as features. We mirror this at inference time, so changing
