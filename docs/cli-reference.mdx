@@ -27,13 +27,13 @@ amperstand vault backend clear          # forget the server
 amperstand capture <url>
 ```
 
-POSTs the URL to `/capture`. Returns the saved doc's ID and path. Use `--stdout` to also print the markdown the server extracted.
+POSTs the URL to `/capture`. Server runs the right extractor and persists the markdown into the vault. Returns the saved doc's ID and path.
 
 | Option | What |
 | --- | --- |
-| `--stdout` | Print the extracted markdown after saving |
 | `--no-persist` | Extract only — don't save in the vault |
-| `--type <kind>` | Override the auto-detected type (article, youtube, etc.) |
+
+For richer flows (async extraction, capture from pre-rendered HTML, capturing `.eml` files), call the [HTTP API](/api-reference/capture) directly.
 
 ## Feeds
 
@@ -44,33 +44,17 @@ amperstand feed list                # show subscriptions + last sync (GET /v1/fe
 amperstand feed sync                # trigger a server-side sync (POST /v1/feeds/sync)
 ```
 
-The actual feed polling runs on a cron on the server. `feed sync` just kicks it manually.
+`feed remove` also accepts the feed URL — the CLI looks it up in the server's list and resolves the ID for you.
 
-## Email
-
-```bash
-amperstand email parse <file.eml>
-```
-
-Reads the local `.eml` file's bytes and POSTs them to the server's email-parse endpoint. The server runs the newsletter extractor and persists the result.
-
-```bash
-amperstand email senders        # show senders the server has seen
-amperstand email allow <addr>   # add to server's allowlist
-amperstand email block <addr>   # block
-```
-
-These all hit server-side state. Allowlists live on the server, not in `~/.amperstand`.
-
-For the IMAP fetch loop (continuous newsletter capture), see [Deployment](/deployment) — it runs as a systemd unit on the server, not via the CLI.
+Feed polling runs on a cron on the server; `feed sync` just kicks it manually.
 
 ## Vault
 
 ```bash
-amperstand vault status         # GET /v1/health + counts
+amperstand vault status         # GET /health + doc count
 ```
 
-That's it for vault-level commands today. Per-doc operations (get / update / delete) go through the API directly — see [Vault documents](/api-reference/vault-docs).
+That's it for vault-level commands today. Per-doc operations (get / update / delete) go through the [HTTP API](/api-reference/vault-docs) directly.
 
 ## Config
 
@@ -79,11 +63,23 @@ amperstand config show          # dump ~/.amperstand/config.json
 amperstand config set <key> <value>
 ```
 
-The CLI's config is small: the server URL, the API key env-var name, and a few defaults.
+The CLI's config is small: the server URL, the API key env-var name, and log settings. Vault state (feeds, allowlists, captured-URL history) lives on the server, not in `~/.amperstand`.
+
+## What the CLI doesn't do
+
+Things you might expect but should reach for elsewhere:
+
+| You want… | Use… |
+| --- | --- |
+| Run an IMAP fetch loop | `amperstand-email-watch.service` on the server (systemd unit; see [Deployment](/deployment)) |
+| Manage the email-sender allowlist | `amperstand-admin` on the server |
+| Search or read docs | The [HTTP API](/api-reference/vault-search) — no CLI commands for this today; pipe `curl` and `jq` |
+| Capture from local HTML or an `.eml` file | The [HTTP API](/api-reference/capture) — `/capture/html` or `/email/parse` |
+| Write directly to a local folder | Not supported. The CLI is an HTTP client; the vault lives on the server. If you want files on your laptop, `rsync` the server's vault directory or mount it. |
 
 ## Server-side admin
 
-`amperstand-admin` is a separate CLI that ships with `amperstand-core` and runs **on the server**, not on your laptop. It operates on the vault DB directly, bypassing the API. Useful for batch operations: reindexing, backfilling embeddings, pruning old jobs.
+`amperstand-admin` ships with `amperstand-core` and runs **on the server**, not your laptop. It operates on the vault DB directly, bypassing the API. Useful for batch operations: reindexing, backfilling embeddings, pruning old jobs.
 
 ```bash
 amperstand-admin --help
@@ -91,4 +87,4 @@ amperstand-admin vec_rebuild        # backfill embeddings for un-embedded docs
 amperstand-admin config show        # what the server sees
 ```
 
-You'd typically SSH to your server to run these — never from your laptop.
+SSH to your server to run these.
