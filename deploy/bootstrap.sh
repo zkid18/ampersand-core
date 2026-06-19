@@ -76,6 +76,31 @@ echo "==> Preparing env file ${ENV_FILE}"
 install -d -m 0750 -o root -g "$SERVICE_USER" /etc/amperstand
 
 if [ ! -f "$ENV_FILE" ]; then
+    # Refuse to silently mint a NEW key when the vault already has data —
+    # the operator probably restored from backup and forgot the env file,
+    # not "this is a green-field install." Minting a new key in that case
+    # silently rotates every existing client (CLI, bot, extension) with no
+    # warning. Require an explicit confirmation.
+    DATA_NONEMPTY=0
+    if [ -d "$DATA_DIR" ] && [ -n "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
+        DATA_NONEMPTY=1
+    fi
+    if [ "$DATA_NONEMPTY" = 1 ] && [ "${AMPERSTAND_BOOTSTRAP_FORCE_NEW_KEY:-}" != "1" ]; then
+        echo
+        echo "ERROR: ${ENV_FILE} is missing but ${DATA_DIR} is not empty." >&2
+        echo "       Refusing to mint a new AMPERSTAND_API_KEY — that would silently" >&2
+        echo "       rotate every client (CLI, bot, extension) against the existing vault." >&2
+        echo
+        echo "  If you restored from backup: restore the env file too (the deployment" >&2
+        echo "  docs treat it as a separate backup line; it must come back with the vault)." >&2
+        echo
+        echo "  If you really do want a fresh key (this IS a clean install on top of" >&2
+        echo "  stale data you'll discard), re-run with:" >&2
+        echo "    AMPERSTAND_BOOTSTRAP_FORCE_NEW_KEY=1 sudo bash deploy/bootstrap.sh" >&2
+        echo
+        exit 2
+    fi
+
     KEY="$(openssl rand -hex 32)"
     cat > "$ENV_FILE" <<EOF
 AMPERSTAND_API_KEY=${KEY}
@@ -84,9 +109,20 @@ EOF
     chmod 0640 "$ENV_FILE"
     chown root:"$SERVICE_USER" "$ENV_FILE"
     echo
-    echo "    NEW API KEY GENERATED — store this somewhere safe NOW."
-    echo "    AMPERSTAND_API_KEY=${KEY}"
-    echo
+    # Only echo the key to stdout on an interactive TTY. On non-interactive
+    # runs (CI provisioner, `tee bootstrap.log`, terraform remote-exec, etc.)
+    # the operator's "logfile" would otherwise capture the master credential
+    # in a less-restrictive location than /etc/amperstand/env (0640 root:amp).
+    if [ -t 1 ]; then
+        echo "    NEW API KEY GENERATED — store this somewhere safe NOW."
+        echo "    AMPERSTAND_API_KEY=${KEY}"
+        echo
+    else
+        echo "    NEW API KEY GENERATED (suppressed from non-interactive stdout)."
+        echo "    Retrieve it on the server with:"
+        echo "      grep '^AMPERSTAND_API_KEY=' ${ENV_FILE} | cut -d= -f2-"
+        echo
+    fi
 else
     echo "    env file already exists, leaving it alone"
 fi

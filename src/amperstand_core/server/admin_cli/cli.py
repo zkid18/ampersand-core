@@ -15,6 +15,7 @@ from amperstand_core.server.admin_cli.commands import backup as backup_cmd
 from amperstand_core.server.admin_cli.commands import classifier as classifier_cmd
 from amperstand_core.server.admin_cli.commands import feeds_sync as feeds_sync_cmd
 from amperstand_core.server.admin_cli.commands import integrity as integrity_cmd
+from amperstand_core.server.admin_cli.commands import reindex as reindex_cmd
 from amperstand_core.server.admin_cli.commands import rotate_key as rotate_key_cmd
 from amperstand_core.server.admin_cli.commands import stats as stats_cmd
 from amperstand_core.server.admin_cli.commands import vec_rebuild as vec_rebuild_cmd
@@ -149,6 +150,12 @@ def feeds_sync(
 ) -> None:
     """Trigger POST /feeds/sync against the local server (used by amperstand-feed-sync.service)."""
     feeds_sync_cmd.run(_resolve(env_file), base_url=base_url)
+
+
+@app.command()
+def reindex(env_file: EnvFileOpt = None) -> None:
+    """Rebuild the metadata sidecar (.store/meta.db) from the markdown files."""
+    reindex_cmd.run(_resolve(env_file))
 
 
 if __name__ == "__main__":

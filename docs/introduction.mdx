@@ -5,49 +5,53 @@ description: "Self-hosted personal vault. Capture URLs, YouTube, RSS, and newsle
 
 ## What it is
 
-Amperstand is a **self-hosted personal vault** — a small server you run that:
+Amperstand is a **self-hosted personal vault**. It has two parts you need to understand:
 
-- Captures web content (articles, YouTube, RSS, newsletter emails) into clean markdown files you own
-- Stores them in a folder on disk with a SQLite index for FTS5 + vector + hybrid search
-- Exposes a REST API any client can talk to
+1. **The server (`amperstand-core`)** — the only thing that touches your data. Runs on a box you control: a $4 droplet, a home NAS, even localhost. Exposes a REST API.
+2. **Clients (anything that speaks HTTP to the server)** — the official CLI (`amperstand`), a Telegram bot, a Chrome extension, your own agent code. Capture surfaces, query surfaces, integration glue. The bot and extension aren't special — they're just two HTTP clients we ship as reference implementations. You can replace either of them, or add a fifth client tomorrow, and the server doesn't care.
 
-You run it once on a $4 droplet (or your home server), then connect any number of clients: a CLI on your laptop, a Telegram bot, a Chrome extension, your own agent code. They all share one vault.
+That's the entire architecture. One server. N clients. HTTP between them.
 
 ## Architecture
 
 ```
-   ┌──────────────────┐
-   │  amperstand      │  ← CLI on your laptop
-   │  (HTTP client)   │
-   └─────────┬────────┘
-             │
-   ┌─────────┴────────┐    ┌──────────────┐
-   │  Telegram bot    │    │  Chrome ext  │
-   └─────────┬────────┘    └──────┬───────┘
-             │                    │
-             └──────────┬─────────┘
-                        │ HTTP + API key
-                ┌───────▼──────────┐
-                │                  │
-                │  amperstand-core │  ← the server you run
-                │   (FastAPI)      │
-                │                  │
-                │ ┌──────────────┐ │
-                │ │ extractors   │ │
-                │ │ vault store  │ │
-                │ │ feed registry│ │
-                │ │ job queue    │ │
-                │ │ FTS5 + vec   │ │
-                │ └──────────────┘ │
-                └────────┬─────────┘
-                         │
-                  ┌──────▼────────┐
-                  │  ~/vault/     │   ← markdown files
-                  │  vault.db     │   ← SQLite index
-                  └───────────────┘
+   ┌────────────────────────────────────────────────────────────┐
+   │  Clients  (any HTTP client speaking the API)               │
+   │                                                            │
+   │  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌──────────────┐  │
+   │  │  CLI    │  │ Telegram │  │ Chrome  │  │  your agent  │  │
+   │  │ amper-  │  │   bot    │  │  ext.   │  │  / script    │  │
+   │  │ stand   │  │          │  │         │  │  / anything  │  │
+   │  └────┬────┘  └────┬─────┘  └────┬────┘  └──────┬───────┘  │
+   │       │            │              │              │         │
+   └───────┼────────────┼──────────────┼──────────────┼─────────┘
+           │            │              │              │
+           └────────────┴──────┬───────┴──────────────┘
+                               │  HTTP + API key
+                               │
+                       ┌───────▼──────────┐
+                       │                  │
+                       │  amperstand-core │   ← the server
+                       │   (FastAPI)      │
+                       │                  │
+                       │  extractors      │   trafilatura, yt-dlp,
+                       │  vault store     │   feedparser, IMAP, …
+                       │  feed registry   │
+                       │  job queue       │   async capture
+                       │  search index    │   FTS5 + sqlite-vec
+                       └────────┬─────────┘
+                                │
+                                │  reads & writes
+                                │
+                       ┌────────▼─────────┐
+                       │  vault dir       │   ← markdown files on disk
+                       │  .store/meta.db  │   ← SQLite index (rebuildable)
+                       └──────────────────┘
 ```
 
-Every client speaks HTTP. The server is the only thing that touches your vault files.
+**The server is the only process that touches the vault directory.** Clients send a URL or some content, get back JSON. They never read or write the markdown files directly.
+
+**Clients are interchangeable.** Today we ship a CLI, a Telegram bot, and a Chrome extension. Each is ~300–600 lines of code wrapping the same six or seven HTTP endpoints. Build a Discord bot, a CLI in Go, an iOS Shortcut, an n8n flow — the server doesn't know or care.
 
 ## What it captures
 

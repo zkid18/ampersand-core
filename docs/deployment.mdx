@@ -8,24 +8,28 @@ This page documents the exact production layout for the reference deployment —
 ## Layout
 
 ```
-/opt/amperstand/                  ← venv + git checkout (read-only at runtime)
-/etc/amperstand/env               ← AMPERSTAND_API_KEY, IMAP creds, Telegram token
-/var/lib/amperstand/              ← vault data root (markdown + sqlite)
-  ├── vault/                      ← markdown files
-  └── amperstand.db               ← sqlite index
+/opt/amperstand/                       ← venv + git checkout (read-only at runtime)
+/etc/amperstand/env                    ← AMPERSTAND_API_KEY, IMAP creds, OpenAI key
+/var/lib/amperstand/vault/             ← vault data root (set as $AMPERSTAND_DATA_DIR)
+  ├── 2026/06/<slug>.md                ← markdown files (YYYY/MM tree)
+  ├── .store/meta.db                   ← SQLite metadata + FTS5 index
+  ├── .store/capture_jobs.db           ← async capture queue
+  └── .store/by-id/<doc_id>/doc.md     ← symlinks for stable doc-id lookup
 ```
 
 Owned by a dedicated `amperstand` user (no shell, no home dir).
 
 ## systemd units
 
-Three units, all using the same hardening profile:
+The core ships these units in `deploy/systemd/`, all using the same hardening profile:
 
-| Unit | What |
-| --- | --- |
-| `amperstand-server.service` | FastAPI + uvicorn, listens on `:80` via Caddy |
-| `amperstand-tg-bot.service` | Long-polling Telegram bot, talks HTTP to the server |
-| `amperstand-email-watch.service` | IMAP fetch loop, persists via the server's API |
+| Unit | What | Repo |
+| --- | --- | --- |
+| `amperstand-server.service` | FastAPI + uvicorn, listens on `:80` via Caddy | core |
+| `amperstand-vault-watcher.service` | Watchdog-driven re-index of hand-edited markdown | core |
+| `amperstand-feed-sync.service` + `.timer` | Periodic RSS sync (runs `amperstand-admin feeds-sync`) | core |
+| `amperstand-email-watch.service` | IMAP fetch loop, persists via the server's API | core |
+| `amperstand-tg-bot.service` | Telegram bot. Ships from the `amperstand-bot` repo, not core. Drop it into `/etc/systemd/system/` after cloning that repo. | bot repo |
 
 Common hardening flags:
 
@@ -74,7 +78,8 @@ A real runbook, not a one-liner. Three things to back up; one to skip; one to ve
 
 | Thing | Why |
 | --- | --- |
-| `amperstand.db`, `amperstand.db-wal`, `amperstand.db-shm` | SQLite index — fully reconstructible from the markdown via `amperstand-admin reindex`. Backing it up is wasted bandwidth at best, and copying mid-write can produce corrupted files. |
+| `.store/meta.db`, `.store/meta.db-wal`, `.store/meta.db-shm` | SQLite metadata + FTS5 index — fully reconstructible from the markdown via `amperstand-admin reindex`. Backing it up is wasted bandwidth at best, and copying mid-write can produce corrupted files. |
+| `.store/capture_jobs.db*` | Async capture queue — losing it loses any in-flight queued jobs (recoverable: re-POST). |
 | `.store/by-id/` (symlinks) | Internal lookup tree. Rebuilt on first server start. |
 
 ### Nightly backup (additive, off-box)
@@ -107,8 +112,8 @@ If you DO want a point-in-time SQLite snapshot for fast restore-without-reindex:
 
 ```bash
 # Atomic — uses SQLite's online backup API; safe during writes
-sqlite3 /var/lib/amperstand/amperstand.db \
-    ".backup /tmp/amperstand-$(date +%Y%m%d).db"
+sqlite3 /var/lib/amperstand/vault/.store/meta.db \
+    ".backup /tmp/amperstand-meta-$(date +%Y%m%d).db"
 ```
 
 Then rsync the resulting `.db` file. Avoid copying the live DB directly with `cp` / `rsync` — you can catch it mid-WAL-checkpoint and get an inconsistent file.
@@ -138,8 +143,10 @@ ssh backup-host "cat /backups/amperstand/env-latest.gpg" \
 chmod 0640 /etc/amperstand/env
 chown root:amperstand /etc/amperstand/env
 
-# Rebuild the SQLite index from the markdown
+# Rebuild the metadata + FTS5 sidecar from the markdown
 sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin reindex
+# (then refresh vector embeddings if you use semantic search — costs OpenAI tokens)
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin vec-rebuild
 
 # Bring it up
 sudo systemctl start amperstand-server
@@ -169,11 +176,11 @@ After every restore (or as a weekly cron):
 find /var/lib/amperstand/vault -type f -name '*.md' | wc -l
 du -sh /var/lib/amperstand/vault
 
-# Verify a sample of docs against their body_hash frontmatter field
-sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin verify-hashes --sample 100
+# Walk every doc, parse frontmatter, verify content_hash on disk matches
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin integrity --deep
 ```
 
-The `verify-hashes` command reads each doc's frontmatter `body_hash` and recomputes it against the file body. Discrepancies mean either: (a) someone edited the file without going through the API and didn't update the hash, or (b) the file is corrupted.
+`integrity --deep` walks every `.md` file, parses its frontmatter, checks that `id` resolves through the `.store/by-id/` symlink tree, and recomputes `content_hash` from disk to compare against the value in the frontmatter. Discrepancies mean either: (a) someone hand-edited the file without going through the API (the watcher's job is to catch this and reindex; integrity reports the lag), or (b) the file is corrupted.
 
 ## Bootstrap script
 
