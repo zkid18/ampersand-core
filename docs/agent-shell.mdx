@@ -1,0 +1,109 @@
+---
+title: CLI as a shell tool
+description: "Have your agent shell out to `amperstand capture` or query the HTTP API directly."
+---
+
+The simplest way to plug an agent into your vault is to let it shell out to the CLI. Works in any framework that can execute commands — Claude Code, Cursor, n8n, custom Python agents, shell-equipped LLMs.
+
+## Pattern: capture-on-mention
+
+Most agents want this: "when the user pastes a URL, save it to my vault."
+
+```bash
+# Agent shells out to:
+amperstand capture <url>
+```
+
+That's the entire integration. The CLI returns the saved doc ID; the agent can echo it back or do nothing.
+
+### Setup
+
+The agent needs `AMPERSTAND_API_KEY` in its environment and a configured server. Either:
+
+- The agent inherits your shell env (Cursor, Claude Code — fine), or
+- You set it explicitly in the agent's config (n8n, custom code)
+
+```bash
+export AMPERSTAND_API_KEY="<your-key>"
+amperstand vault backend set-http https://your-server --api-key-env AMPERSTAND_API_KEY
+```
+
+## Pattern: query then capture
+
+Better: have the agent check the vault before grabbing the same URL twice.
+
+```bash
+# Capture is already idempotent on source URL — the server returns the existing
+# doc rather than re-saving. So you can just call it; no pre-check needed:
+amperstand capture <url>
+```
+
+The server dedups on the URL via `body_hash`. Re-capturing the same article is cheap and safe.
+
+## Pattern: search the vault from an agent
+
+The CLI doesn't have a search subcommand today (the API does). Use `curl`:
+
+```bash
+curl -s -X POST https://your-server/v1/docs/search/hybrid \
+    -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"q":"your query", "limit":10, "rerank":true}' \
+  | jq -r '.items[] | "\(.id)  \(.title)"'
+```
+
+For a more guided experience, install the deep-research [Claude Skill](/agent-skill) instead — it runs a whole scope-and-research workflow over the vault.
+
+## Framework-specific examples
+
+<Tabs>
+  <Tab title="Claude Code">
+    Drop this in your project's `CLAUDE.md`:
+
+    ```markdown
+    ## Vault tools
+
+    - To save a URL to my Amperstand vault, run: `amperstand capture <url>`
+    - To search the vault, POST to `https://your-server/v1/docs/search/hybrid`
+      with `Authorization: Bearer $AMPERSTAND_API_KEY`.
+    - For deep research, invoke `/vault-research <topic>` (see /agent-skill).
+    ```
+
+    Claude Code reads `CLAUDE.md` automatically, so any conversation in this
+    project knows how to reach the vault.
+  </Tab>
+  <Tab title="Cursor">
+    Add to `.cursorrules`:
+
+    ```
+    When the user pastes a URL they want to remember, run:
+      amperstand capture <url>
+
+    Searches and richer queries: see prompts/vault-agent.md in this repo.
+    ```
+  </Tab>
+  <Tab title="Python agent">
+    ```python
+    import subprocess
+
+    def capture(url: str) -> str:
+        result = subprocess.run(
+            ["amperstand", "capture", url],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip()
+    ```
+
+    Bind that as a tool in your agent framework (LangChain, Pydantic AI, etc.)
+    and the LLM can call it directly.
+  </Tab>
+  <Tab title="n8n / Make">
+    Use an "Execute Command" node. Command: `amperstand capture {{$json.url}}`.
+    The node's working directory needs `AMPERSTAND_API_KEY` set — either
+    in the host env or via the n8n environment-variables config.
+  </Tab>
+</Tabs>
+
+## When to use the HTTP API instead
+
+Shell-out is great for capture. For richer flows (read a doc, get related, search with rerank), call the [HTTP API](/api-reference/overview) directly. Less ceremony than wrapping `curl` in shell, and gives you typed JSON to feed the LLM.

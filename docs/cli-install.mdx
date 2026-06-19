@@ -1,0 +1,93 @@
+---
+title: Install the CLI
+description: "Install `amperstand` on your laptop, point it at your server, capture your first URL."
+---
+
+The CLI is `amperstand` — a tiny HTTP client (~5 MB install, two dependencies). Use it once you have a [server running](/quickstart).
+
+## 1. Install
+
+```bash
+pip install amperstand
+```
+
+That's it. The CLI does no extraction itself — every command translates to a REST call against your server. So no Playwright, no yt-dlp, no heavy ML libs.
+
+Requires Python 3.10+.
+
+## 2. Get your API key
+
+From your server (the bootstrap script printed it; if you missed it):
+
+```bash
+ssh root@<your-server>
+grep AMPERSTAND_API_KEY /etc/amperstand/env
+```
+
+## 3. Set the key in your shell
+
+On your laptop:
+
+```bash
+# Save to a 0600 file so it doesn't sit in your shell history
+echo "<the-64-char-hex>" > ~/.amperstand-api-key
+chmod 600 ~/.amperstand-api-key
+
+# Export it from your shell rc
+echo 'export AMPERSTAND_API_KEY="$(cat ~/.amperstand-api-key | tr -d "\n")"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+## 4. Connect to the server
+
+```bash
+amperstand vault backend set-http https://your-server \
+    --api-key-env AMPERSTAND_API_KEY
+```
+
+<Warning>
+`--api-key-env` takes the **name** of the environment variable, not the value. The CLI stores the name in `~/.amperstand/config.json` and reads the value at runtime — so rotating the key on the server just means `export AMPERSTAND_API_KEY=<new>`. Passing the value directly leaks it into the config file.
+</Warning>
+
+## 5. Capture something
+
+```bash
+amperstand capture https://danluu.com/why-hardware-development-is-hard/
+```
+
+You should see:
+
+```
+Saved: 01JK8XQ4... — Why hardware development is hard
+  vault/2026/06/why-hardware-development-is-hard.md
+```
+
+The CLI sent the URL to the server, the server extracted the markdown, persisted it, and returned the doc ID. The actual file lives on the server at `$AMPERSTAND_DATA_DIR`.
+
+## 6. Verify the round-trip
+
+```bash
+amperstand vault status
+# Server: ok
+# Docs: 1
+```
+
+If you also configured `OPENAI_API_KEY` on the server, semantic search works:
+
+```bash
+curl -X POST https://your-server/v1/docs/search/semantic \
+     -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"q":"hardware development", "limit":3}'
+```
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Every CLI command" icon="terminal" href="/cli-reference">
+    `feed add/remove/list/sync`, `vault status`, `vault backend show/clear`, `config show/set`.
+  </Card>
+  <Card title="Embed the vault in an agent" icon="robot" href="/agent-shell">
+    Have your agent shell out to `amperstand capture` or query the HTTP API directly.
+  </Card>
+</CardGroup>

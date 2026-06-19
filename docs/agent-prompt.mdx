@@ -1,0 +1,105 @@
+---
+title: Vault-aware system prompt
+description: "Drop-in agent definitions for Custom GPTs, Cursor, Claude Projects, n8n, and any LLM tool that takes a system prompt."
+---
+
+If your tool isn't Claude Code, you can still teach any LLM to query your vault by pasting a system prompt. The repo ships three:
+
+| Prompt | Role | Use when |
+| --- | --- | --- |
+| [`vault-agent.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/vault-agent.md) | Research agent that knows the vault's HTTP API (search, fetch, related). Cites `[doc_id]` markers, refuses to invent. | Building an agent in Cursor, Custom GPTs, Claude Projects, n8n, or a SaaS LLM app and you want vault access. |
+| [`rag-chat-system.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/rag-chat-system.md) | Grounded-RAG chat: "answer using these N docs, cite them, don't invent." | Building chat-with-curated-docs (similar to the notebook UI). You assemble the working set; the prompt enforces grounding. |
+| [`rerank-judge.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/rerank-judge.md) | A 0–10 relevance scorer for re-ranking search hits. | Building your own search pipeline elsewhere and want an LLM rerank stage. |
+
+## Pattern: vault-agent.md
+
+The most common use. Drop into any system-prompt field:
+
+```
+You are a research agent for the user's personal Ampersand vault — a markdown
+knowledge base of newsletters, RSS, YouTube transcripts, web clippings, and
+email captures. Roughly {{VAULT_SIZE}} docs across multiple languages.
+
+Your job: answer questions grounded in vault content. Every claim cites a vault
+doc id.
+
+## Vault access
+
+- Base URL: {{VAULT_BASE_URL}}   (e.g. http://your-server)
+- Auth: Authorization: Bearer {{AMPERSAND_API_KEY_FROM_ENV}}
+- NEVER echo the API key. It transits in headers only.
+
+[... endpoint table ...]
+```
+
+The full prompt is ~110 lines and includes:
+- Endpoint table (which search mode for which query type)
+- Citation format (`[doc_id]`)
+- Language guidance (vault is multilingual)
+- Hard rules (cite, don't invent, mark gaps as `[uncertain]`)
+
+### Substitute the variables
+
+Before sending to the LLM, replace:
+
+| Variable | What |
+| --- | --- |
+| `{{VAULT_BASE_URL}}` | Your server's base URL (e.g. `https://amperstand.example.com`) |
+| `{{AMPERSAND_API_KEY_FROM_ENV}}` | Reference to the env var holding the key — your tool needs to substitute the actual value at request time, not bake it into the prompt |
+| `{{VAULT_SIZE}}` | A round number for context (run `amperstand vault status` to get it) |
+
+## Where to paste it
+
+<Tabs>
+  <Tab title="Custom GPT">
+    Settings → Instructions → paste. Add the vault server URL as a configured action in the GPT's tool config so it can actually make HTTP calls. Key goes in the action's auth section, not the prompt.
+  </Tab>
+  <Tab title="Claude Project">
+    Project settings → Custom instructions → paste. Claude reads it on every conversation in that project. For the HTTP calls, the Project will need a tool that can fetch URLs — set that up separately.
+  </Tab>
+  <Tab title="Cursor `.cursorrules`">
+    Drop the prompt into `.cursorrules` (or `.cursor/rules/vault.md`). Cursor picks it up automatically. Cursor's tool calls will need to invoke `curl` to actually hit the API.
+  </Tab>
+  <Tab title="n8n LLM node">
+    Put the prompt in the node's "System Message" field. The HTTP calls happen via n8n's HTTP Request nodes wired into the LLM node's tool config.
+  </Tab>
+  <Tab title="Custom Python agent">
+    ```python
+    SYSTEM_PROMPT = open("prompts/vault-agent.md").read()
+    SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{{VAULT_BASE_URL}}", base_url)
+    SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{{VAULT_SIZE}}", str(doc_count))
+    # Pass {{AMPERSAND_API_KEY_FROM_ENV}} as a reference — the LLM should never see the key.
+    ```
+  </Tab>
+</Tabs>
+
+## Pattern: rag-chat-system.md
+
+Use when the caller has *already chosen* a working set of docs and wants the LLM to answer strictly from those. This is what `POST /v1/chat` uses internally.
+
+```
+You are a research assistant answering questions strictly grounded in the
+user's personal vault docs listed below.
+
+[... rules: cite, don't invent, surface disagreements ...]
+
+DOCS IN WORKING SET ({{N_DOCS}}):
+
+{{DOCS_BLOCK}}
+```
+
+You assemble `{{DOCS_BLOCK}}` by concatenating doc bodies (each prefixed with its ID for citation). Total length is your context budget.
+
+## Pattern: rerank-judge.md
+
+For building your own search pipeline. Takes a query + a search hit, returns a 0–10 relevance score. Pair with `/v1/docs/search` (FTS5) or `/v1/docs/search/semantic` to add an LLM rerank stage to whatever ranking you've got.
+
+## Citations resolve back to your vault
+
+Every prompt instructs the LLM to cite as `[doc_id]` (the bare 26-char ULID). Tools that render these can linkify:
+
+```
+http://your-server/ui/#/doc/<doc_id>
+```
+
+(The web UI accepts that path and opens the doc.)

@@ -1,126 +1,124 @@
 ---
-title: Quickstart
-description: "Run the server, install the CLI, capture your first URL."
+title: Set up a server
+description: "Run an Amperstand vault server on a fresh Ubuntu droplet in under 10 minutes."
 ---
 
-Amperstand is two pieces: a **server** (`amperstand-core`) you run somewhere, and a **CLI client** (`amperstand`) you run on your laptop. This page sets up both and connects them.
+This page sets up the server that stores your vault and exposes the HTTP API. Once it's running, install [the CLI](/cli-install) on your laptop to talk to it.
 
-You can run the server locally for the quickstart, then move it to a droplet later — see [Deployment](/deployment).
+## What you need
 
-## 1. Install the server
+- An Ubuntu 22.04+ box you can SSH into as root. A 1 GB DigitalOcean droplet ($4/mo) is the reference target.
+- A domain name (optional today, recommended before this server goes public).
+- An OpenAI API key (optional — required for semantic search, hybrid rerank, YouTube audio fallback).
 
-On the machine that will hold your vault (your laptop for now, a droplet later):
+## One-command bootstrap
 
-```bash
-pip install amperstand-core
-playwright install chromium    # for JS-heavy pages
-```
-
-That's the whole server — FastAPI, uvicorn, all the extractors, sqlite-vec, embeddings. No extras needed.
-
-## 2. Configure the server
-
-Three environment variables:
+SSH in as root, then:
 
 ```bash
-# Auth — clients send this as Bearer
-export AMPERSTAND_API_KEY="$(openssl rand -hex 32)"
-
-# Where to put markdown + the SQLite index
-export AMPERSTAND_DATA_DIR="$HOME/.amperstand-vault"
-
-# Embeddings + hybrid-search rerank + YouTube Whisper fallback
-export OPENAI_API_KEY="sk-..."
+git clone https://github.com/zkid18/ampersand-core /opt/amperstand/amperstand-core
+cd /opt/amperstand/amperstand-core
+sudo bash deploy/bootstrap.sh
 ```
 
-`OPENAI_API_KEY` is technically optional, but without it:
+`deploy/bootstrap.sh` is the production install. Re-running it is safe — every step checks before doing.
 
-| Feature | Status without OPENAI_API_KEY |
+### What bootstrap does
+
+1. Installs apt packages: Python 3, Caddy, ufw, git, curl
+2. Creates a dedicated `amperstand` system user
+3. Generates `AMPERSTAND_API_KEY` (a 64-char hex token) and writes it to `/etc/amperstand/env` mode 0640
+4. Builds a Python venv at `/opt/amperstand/venv`, installs the server editable from this clone
+5. Installs systemd units: `amperstand-server.service`, `amperstand-vault-watcher.service`, `amperstand-feed-sync.timer`. The email-watch unit is installed but stays disabled until you configure IMAP.
+6. Configures Caddy (HTTP only by default; bundled `Caddyfile.tls` for later)
+7. Opens ports 22/80/443 in UFW
+8. Starts `amperstand-server`, waits for `/health`, prints the API key once
+
+When it finishes, **copy the printed API key** — you'll paste it as `AMPERSTAND_API_KEY` on every client.
+
+## Add an OpenAI key (recommended)
+
+Embeddings, hybrid-search rerank, and YouTube audio-fallback all use the OpenAI API. To enable them:
+
+```bash
+sudo nano /etc/amperstand/env
+# add the line:
+# OPENAI_API_KEY=sk-...
+
+sudo systemctl restart amperstand-server
+```
+
+Without it:
+
+| Feature | State |
 | --- | --- |
-| Capture (articles, YouTube transcripts, feeds, email) | Works |
+| Capture (articles, transcripts, RSS, email) | Works |
 | Keyword search (`/v1/docs/search`) | Works |
 | Semantic search (`/v1/docs/search/semantic`) | Returns `503` |
-| Hybrid search (`/v1/docs/search/hybrid`) | Degrades to FTS5-only, no rerank |
+| Hybrid search (`/v1/docs/search/hybrid`) | Degrades to FTS5-only |
 | YouTube audio-fallback transcripts | Disabled |
 
-Embedding model: `text-embedding-3-small`, ~$0.02 per 1,000 docs. Worth it.
+Model: `text-embedding-3-small`, ~$0.02 per 1,000 docs.
 
-See [Configuration](/configuration) for every env var the server reads.
+See [Configuration](/configuration) for every server env var.
 
-## 3. Run the server
-
-```bash
-amperstand-server
-```
-
-This is a console script that wraps uvicorn — defaults to `0.0.0.0:8765`. Override with `--host`, `--port`, or via `$AMPERSTAND_HOST`/`$AMPERSTAND_PORT`. Run `amperstand-server --help` for all flags.
-
-You should see:
-
-```
-INFO:     Uvicorn running on http://0.0.0.0:8765
-```
-
-For production (systemd unit + Caddy + swap), see [Deployment](/deployment).
-
-## 4. Install the CLI
-
-In a separate terminal — or on a different machine entirely:
+## Verify it's running
 
 ```bash
-pip install amperstand
+curl http://<your-server-ip>/health
+# {"status":"ok"}
 ```
 
-The CLI is HTTP-only and lightweight. No Playwright, no yt-dlp, no extraction code. It just speaks to the server.
-
-## 5. Connect the CLI to the server
-
-```bash
-# Make the key available to your shell
-export AMPERSTAND_API_KEY="<paste the key from step 2>"
-
-# Point the CLI at the server (use the server's URL, not localhost if you're on a different machine)
-amperstand vault backend set-http http://localhost:8765 \
-    --api-key-env AMPERSTAND_API_KEY
-```
-
-<Warning>
-`--api-key-env` takes the **name** of an environment variable, not the value. Passing the value directly leaks it into `~/.amperstand/config.json` and shell history. See [Authentication](/api-reference/authentication).
-</Warning>
-
-To make this survive new shells, add to your `~/.zshrc`:
-
-```bash
-echo 'export AMPERSTAND_API_KEY="<your-key>"' >> ~/.zshrc
-```
-
-## 6. Capture something
-
-```bash
-amperstand capture https://danluu.com/why-hardware-development-is-hard/
-```
-
-The CLI sends the URL to the server, the server runs the extractor, writes the markdown into `$AMPERSTAND_DATA_DIR`, and returns the doc ID. You'll see:
-
-```
-saved as 01JK8XQ4... (vault/2026/06/why-hardware-development-is-hard.md)
-```
-
-## 7. Verify search works
+Or, once you've installed the CLI on your laptop:
 
 ```bash
 amperstand vault status
-
-curl -X POST http://localhost:8765/v1/docs/search/semantic \
-     -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"q":"hardware development", "limit":3}'
+# Server: ok
+# Docs: 0
 ```
 
-If you get results, embeddings are live. If you get `503: semantic search disabled`, `OPENAI_API_KEY` isn't set in the server process.
+## Next steps
 
-## Where to go next
+<CardGroup cols={2}>
+  <Card title="Install the CLI" icon="terminal" href="/cli-install">
+    Point a CLI on your laptop at this server and capture your first URL.
+  </Card>
+  <Card title="Production hardening" icon="shield" href="/deployment">
+    Add TLS via Caddy, set up swap, rotate keys, configure systemd unit hardening flags.
+  </Card>
+  <Card title="Build a custom client" icon="puzzle-piece" href="/build-client">
+    Telegram bot, browser extension, your own agent — any HTTP client.
+  </Card>
+  <Card title="Browse the API" icon="code" href="/api-reference/overview">
+    The HTTP surface every client speaks.
+  </Card>
+</CardGroup>
 
-- [Deployment](/deployment) — move the server from your laptop to a $4 droplet
-- [CLI reference](/cli-reference) — every `amperstand` command
-- [API reference](/api-reference/overview) — REST endpoints for building your own clients
+## Manual install (if you don't want bootstrap)
+
+If you'd rather do it by hand:
+
+```bash
+# 1. Clone the server
+git clone https://github.com/zkid18/ampersand-core /opt/amperstand/amperstand-core
+cd /opt/amperstand/amperstand-core
+
+# 2. Make a venv and install
+python3 -m venv /opt/amperstand/venv
+/opt/amperstand/venv/bin/pip install -e .
+
+# 3. Set env vars
+sudo mkdir -p /etc/amperstand
+sudo tee /etc/amperstand/env <<EOF
+AMPERSTAND_API_KEY=$(openssl rand -hex 32)
+AMPERSTAND_DATA_DIR=/var/lib/amperstand/vault
+EOF
+sudo chmod 0640 /etc/amperstand/env
+
+# 4. Run the server
+source /etc/amperstand/env
+export AMPERSTAND_API_KEY AMPERSTAND_DATA_DIR
+/opt/amperstand/venv/bin/amperstand-server --host 0.0.0.0 --port 8765
+```
+
+You'll then need to set up systemd + Caddy yourself — see [Deployment](/deployment) for the production layout.

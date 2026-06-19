@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Amperstand",
-  "description": "Markdown-first personal vault. Capture URLs, YouTube, RSS, and newsletters into files you own.",
+  "description": "Self-hosted personal vault. Capture URLs, YouTube, RSS, and newsletters into a searchable store any client can query.",
   "colors": {
     "primary": "#0F172A",
     "light": "#3B82F6",
@@ -12,53 +12,68 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Set up a server",
         "groups": [
           {
             "group": "Get started",
             "pages": [
               "introduction",
-              "quickstart",
-              "concepts"
+              "quickstart"
             ]
           },
           {
             "group": "Reference",
             "pages": [
+              "concepts",
               "configuration",
-              "cli-reference",
               "deployment"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Use the CLI",
         "groups": [
           {
-            "group": "Overview",
+            "group": "CLI",
+            "pages": [
+              "cli-install",
+              "cli-reference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Embed in agents",
+        "groups": [
+          {
+            "group": "Agents & skills",
+            "pages": [
+              "agent-shell",
+              "agent-skill",
+              "agent-prompt"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Build clients",
+        "groups": [
+          {
+            "group": "Build",
+            "pages": [
+              "build-client"
+            ]
+          },
+          {
+            "group": "API reference",
             "pages": [
               "api-reference/overview",
-              "api-reference/authentication"
-            ]
-          },
-          {
-            "group": "Capture",
-            "pages": [
+              "api-reference/authentication",
               "api-reference/capture",
-              "api-reference/jobs"
-            ]
-          },
-          {
-            "group": "Vault",
-            "pages": [
+              "api-reference/jobs",
               "api-reference/vault-docs",
-              "api-reference/vault-search"
-            ]
-          },
-          {
-            "group": "Feeds",
-            "pages": [
+              "api-reference/vault-search",
               "api-reference/feeds"
             ]
           }

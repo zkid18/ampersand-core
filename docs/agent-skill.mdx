@@ -1,0 +1,76 @@
+---
+title: Deep-research Claude Skill
+description: "Install the `/vault-research` skill — end-to-end vault-grounded research in one command."
+---
+
+`vault-research` is a Claude Skill that drives a complete research workflow over your Amperstand vault: scope a topic, take inventory, run per-item deep research, synthesize a report. Vault-only — never reaches the open web.
+
+The skill lives in this repo at [`prompts/vault-research.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/vault-research.md).
+
+## What it does
+
+Four phases:
+
+1. **Scope** — generates an outline from the topic, runs a vault-inventory sweep (multi-language, multi-framing), shows you what the vault actually holds, refines the framework.
+2. **Refine** — confirms items + fields + execution batch sizes via `AskUserQuestion`.
+3. **Research** — fans out per-item deep research using the `vault-research-agent` Claude Code agent. Each item gets its own JSON output with cited doc IDs.
+4. **Synthesize** — combines per-item outputs into a final markdown report with `[doc_id]` citations clickable back to vault docs.
+
+If the vault is thin on a topic, the skill says so explicitly — that's a signal to capture more, not a fallback to the open web.
+
+## Install
+
+The skill is a standalone markdown file with the right frontmatter (`name`, `description`, `allowed-tools`, `user-invocable: true`). Drop it into your Claude config:
+
+```bash
+# User-scoped — available in every project on this machine
+mkdir -p ~/.claude/skills/vault-research
+ln -s /path/to/ampersand-core/prompts/vault-research.md \
+     ~/.claude/skills/vault-research/SKILL.md
+
+# Or project-scoped — only this project
+mkdir -p .claude/skills/vault-research
+cp /path/to/ampersand-core/prompts/vault-research.md \
+   .claude/skills/vault-research/SKILL.md
+```
+
+You also need the companion agent (`vault-research-agent`) that the skill's research phase fans out to. Copy [`prompts/vault-agent-claude-code.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/vault-agent-claude-code.md) into `.claude/agents/vault-research-agent.md`.
+
+## Set the API key
+
+The skill reads `AMPERSTAND_API_KEY` from your project's `.env`:
+
+```bash
+echo "AMPERSTAND_API_KEY=<your-key>" >> .env
+chmod 600 .env
+```
+
+The skill specifically refuses to echo the key — passes it via `Authorization: Bearer` only.
+
+## Invoke
+
+```
+/vault-research <topic>
+```
+
+Example:
+
+```
+/vault-research AI coding history 2020-2026
+```
+
+The skill walks you through scope confirmation, vault inventory, then runs the research phase in batches. Output lands in `./<topic-slug>/results/` with one JSON per researched item plus a final `report.md`.
+
+## When to use this vs the agent prompt
+
+| You want | Use |
+| --- | --- |
+| A guided, multi-phase research workflow with progress visible at each step | This skill (`/vault-research`) |
+| A drop-in agent definition for Cursor / Custom GPT / n8n | [Vault-aware system prompt](/agent-prompt) |
+| A single tool call from your own agent to capture a URL | [CLI as a shell tool](/agent-shell) |
+
+## What it doesn't do
+
+- It doesn't extend your vault — it researches what's already there. To add content, use [the CLI](/cli-reference) or any other capture surface.
+- It doesn't replace human judgment on which docs matter. The vault-inventory phase is meant to involve you (`AskUserQuestion`) before the model commits to a research plan.
+- It doesn't fall back to the open web. If the vault doesn't have it, the report says `[uncertain]`.
