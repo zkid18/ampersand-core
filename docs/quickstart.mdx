@@ -5,11 +5,72 @@ description: "Run an Amperstand vault server on a fresh Ubuntu droplet in under 
 
 This page sets up the server that stores your vault and exposes the HTTP API. Once it's running, install [the CLI](/cli-install) on your laptop to talk to it.
 
-## What you need
+## What this server depends on (read first)
 
-- An Ubuntu 22.04+ box you can SSH into as root. A 1 GB DigitalOcean droplet ($4/mo) is the reference target.
-- A domain name (optional today, recommended before this server goes public).
-- An OpenAI API key (optional — required for semantic search, hybrid rerank, YouTube audio fallback).
+Amperstand is not fully self-contained. Most of the headline features depend on third-party APIs you bring yourself. Be honest with yourself about the costs and the data flow before you deploy.
+
+### OpenAI API — required for half of what's advertised
+
+Amperstand uses OpenAI for **four** distinct things. Three are server-side; one is opt-in.
+
+| Feature | Model | Cost |
+| --- | --- | --- |
+| **Embeddings** (semantic + hybrid search) | `text-embedding-3-small`, 1536d → stored as 512d | ~$0.02 per 1,000 docs at capture time |
+| **Hybrid-search rerank** (the `/v1/docs/search/hybrid` default behavior, and what the deep-research skill leans on) | `gpt-4o-mini` | ~$0.001 per query |
+| **Chat-with-vault** (`/v1/chat` — used by the notebook UI) | `gpt-4o-mini` (configurable) | ~$0.001 per chat turn |
+| **YouTube audio-fallback transcripts** (for videos without captions) — **opt-in** via `AMPERSTAND_YOUTUBE_AUDIO_FALLBACK=1` | OpenAI Whisper | ~$0.006/min of audio |
+
+**Without `OPENAI_API_KEY` on the server:**
+
+| Feature | What happens |
+| --- | --- |
+| Capture (articles, transcripts, RSS, email) | Works |
+| Keyword search (`/v1/docs/search`) | Works |
+| Semantic search (`/v1/docs/search/semantic`) | Returns `503` |
+| Hybrid search (`/v1/docs/search/hybrid`) | Degrades to FTS5-only, no rerank |
+| Chat API (`/v1/chat`) | Returns `503` |
+| Deep-research skill (`/vault-research`) | Severely degraded (rerank is the precision boost the skill depends on) |
+| YouTube without captions | Returns metadata stub, no transcript |
+
+**Privacy note.** Embedding generation sends your *captured doc bodies* to OpenAI. Hybrid rerank sends your *query + retrieved passages* to OpenAI per search. Chat sends your *query + working-set passages*. If your corpus is confidential, embargoed, or pre-publication, set `OPENAI_API_KEY` to empty (or set per-call `rerank=false`) and live with keyword search only — or wait for the local-model option (not built yet).
+
+There's no built-in local-model alternative today (no Ollama integration, no `sentence-transformers` for embeddings). It's on the roadmap; PRs welcome. Until then, OpenAI is the only path for semantic features.
+
+### Residential proxy — required for YouTube & X at scale
+
+DigitalOcean and most cloud hosts are aggressively rate-limited or outright blocked by:
+
+- **YouTube transcript API** (Google rate-limits cloud IPs hard)
+- **Twitter / X** (blocks datacenter IPs)
+- **Cloudflare-walled sites** (challenge pages instead of content)
+- Some news sites with anti-scraping middleware
+
+For a personal vault hitting these from your home IP, this is often fine. For a server on a droplet, expect intermittent capture failures unless you route outbound through a residential proxy:
+
+```bash
+# in /etc/amperstand/env
+AMPERSTAND_PROXY_URL=http://user:pass@residential-proxy-host:port
+```
+
+Cost: **$25–50/mo** for a Webshare/Bright Data/IPRoyal residential plan. Or run your own (Squid behind a tunnel from a home machine). Cheaper alternative: tolerate the YouTube/X capture-failure rate from a bare droplet.
+
+### Summary — what you'll likely pay per month
+
+| Setup | Monthly |
+| --- | --- |
+| Bare droplet, FTS5 search only, no proxy | **$4** (droplet) |
+| + OpenAI for embeddings + semantic search | +$1–5 (depends on capture volume) |
+| + Residential proxy for YouTube/X coverage | +$25–50 |
+| **Total for the full feature set** | **~$30–60/mo** |
+
+Most of that is the proxy. If you skip it, expect YouTube captures to fail ~30–60% of the time from a fresh droplet IP.
+
+## Prerequisites
+
+- An Ubuntu 22.04+ box you can SSH into as root. A 1 GB DigitalOcean droplet is the reference target.
+- A domain name (optional today, recommended before this server faces the public internet).
+- An OpenAI API key (see above for what depends on it).
+- A residential proxy URL (optional but recommended for YouTube/X coverage).
 
 ## One-command bootstrap
 
@@ -21,46 +82,49 @@ cd /opt/amperstand/amperstand-core
 sudo bash deploy/bootstrap.sh
 ```
 
-`deploy/bootstrap.sh` is the production install. Re-running it is safe — every step checks before doing.
+`deploy/bootstrap.sh` is the production install. Re-running is safe — every step checks before doing.
 
-### What bootstrap does
+### What bootstrap does on your host
 
-1. Installs apt packages: Python 3, Caddy, ufw, git, curl
+This script writes to `/etc/`, `/opt/`, `/var/lib/`, installs systemd units, and opens UFW ports. Read it (~150 LoC) before running on a host with anything else important on it.
+
+1. `apt install` Python 3, Caddy, ufw, git, curl
 2. Creates a dedicated `amperstand` system user
-3. Generates `AMPERSTAND_API_KEY` (a 64-char hex token) and writes it to `/etc/amperstand/env` mode 0640
+3. Generates `AMPERSTAND_API_KEY` (64-char hex) and writes it to `/etc/amperstand/env` mode 0640
 4. Builds a Python venv at `/opt/amperstand/venv`, installs the server editable from this clone
-5. Installs systemd units: `amperstand-server.service`, `amperstand-vault-watcher.service`, `amperstand-feed-sync.timer`. The email-watch unit is installed but stays disabled until you configure IMAP.
-6. Configures Caddy (HTTP only by default; bundled `Caddyfile.tls` for later)
+5. Installs systemd units: `amperstand-server.service`, `amperstand-vault-watcher.service`, `amperstand-feed-sync.timer`. Email-watch is installed but stays disabled until you configure IMAP.
+6. Configures Caddy (HTTP only by default; `Caddyfile.tls` bundled for later)
 7. Opens ports 22/80/443 in UFW
 8. Starts `amperstand-server`, waits for `/health`, prints the API key once
 
 When it finishes, **copy the printed API key** — you'll paste it as `AMPERSTAND_API_KEY` on every client.
 
-## Add an OpenAI key (recommended)
+## Add the third-party keys
 
-Embeddings, hybrid-search rerank, and YouTube audio-fallback all use the OpenAI API. To enable them:
+Edit `/etc/amperstand/env` and add what you need:
 
 ```bash
 sudo nano /etc/amperstand/env
-# add the line:
-# OPENAI_API_KEY=sk-...
+```
 
+```ini
+# For semantic + hybrid + chat + Whisper (see "What this depends on" above)
+OPENAI_API_KEY=sk-...
+
+# For YouTube + X capture reliability
+AMPERSTAND_PROXY_URL=http://user:pass@residential-proxy-host:port
+
+# Opt-in to Whisper transcription for videos without captions
+AMPERSTAND_YOUTUBE_AUDIO_FALLBACK=1
+```
+
+Restart:
+
+```bash
 sudo systemctl restart amperstand-server
 ```
 
-Without it:
-
-| Feature | State |
-| --- | --- |
-| Capture (articles, transcripts, RSS, email) | Works |
-| Keyword search (`/v1/docs/search`) | Works |
-| Semantic search (`/v1/docs/search/semantic`) | Returns `503` |
-| Hybrid search (`/v1/docs/search/hybrid`) | Degrades to FTS5-only |
-| YouTube audio-fallback transcripts | Disabled |
-
-Model: `text-embedding-3-small`, ~$0.02 per 1,000 docs.
-
-See [Configuration](/configuration) for every server env var.
+See [Configuration](/configuration) for every env var the server reads.
 
 ## Verify it's running
 
@@ -84,7 +148,7 @@ amperstand vault status
     Point a CLI on your laptop at this server and capture your first URL.
   </Card>
   <Card title="Production hardening" icon="shield" href="/deployment">
-    Add TLS via Caddy, set up swap, rotate keys, configure systemd unit hardening flags.
+    TLS via Caddy, swap, key rotation, backup/restore, systemd hardening flags.
   </Card>
   <Card title="See example clients" icon="puzzle-piece" href="/examples/telegram-bot">
     Telegram bot, browser extension, minimal Python/JS sketches.
@@ -107,7 +171,7 @@ cd /opt/amperstand/amperstand-core
 python3 -m venv /opt/amperstand/venv
 /opt/amperstand/venv/bin/pip install -e .
 
-# 3. Set env vars
+# 3. Set env vars (add OPENAI_API_KEY + AMPERSTAND_PROXY_URL too — see above)
 sudo mkdir -p /etc/amperstand
 sudo tee /etc/amperstand/env <<EOF
 AMPERSTAND_API_KEY=$(openssl rand -hex 32)

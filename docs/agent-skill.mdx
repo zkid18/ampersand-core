@@ -1,76 +1,439 @@
 ---
 title: Deep-research Claude Skill
-description: "Install the `/vault-research` skill — end-to-end vault-grounded research in one command."
+description: "The full skill source — copy-paste into ~/.claude/skills/vault-research/."
 ---
 
-`vault-research` is a Claude Skill that drives a complete research workflow over your Amperstand vault: scope a topic, take inventory, run per-item deep research, synthesize a report. Vault-only — never reaches the open web.
+`vault-research` is a Claude Skill that drives a complete research workflow over your Amperstand vault: **scope → refine → research → report**. Vault-only — never reaches the open web.
 
-The skill lives in this repo at [`prompts/vault-research.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/vault-research.md).
-
-## What it does
-
-Four phases:
-
-1. **Scope** — generates an outline from the topic, runs a vault-inventory sweep (multi-language, multi-framing), shows you what the vault actually holds, refines the framework.
-2. **Refine** — confirms items + fields + execution batch sizes via `AskUserQuestion`.
-3. **Research** — fans out per-item deep research using the `vault-research-agent` Claude Code agent. Each item gets its own JSON output with cited doc IDs.
-4. **Synthesize** — combines per-item outputs into a final markdown report with `[doc_id]` citations clickable back to vault docs.
-
-If the vault is thin on a topic, the skill says so explicitly — that's a signal to capture more, not a fallback to the open web.
+The full source is below. Copy-paste it into a file in your Claude config; no git clone required.
 
 ## Install
 
-The skill is a standalone markdown file with the right frontmatter (`name`, `description`, `allowed-tools`, `user-invocable: true`). Drop it into your Claude config:
+1. Save the **first code block below** to `~/.claude/skills/vault-research/SKILL.md` (user scope — available in every project) or `.claude/skills/vault-research/SKILL.md` (project scope).
+2. Save the **second code block** to `.claude/agents/vault-research-agent.md`. This is the companion Claude Code agent the skill fans out to during the research phase.
+3. **Before saving, replace `<your-server>` with your actual server URL.** Both files reference it.
+4. Make sure `AMPERSTAND_API_KEY` is available in your project's `.env`. The skill reads it lazily; never echoes.
+5. Invoke with `/vault-research <topic>`.
+
+<Warning>
+**Rerank uses an LLM.** When you set `rerank=true` (the skill's default), your query plus the top retrieved passages are sent to OpenAI's `gpt-4o-mini` via your server's `OPENAI_API_KEY`. For confidential corpora (embargoed research, due-diligence work), set `rerank=false` in the skill's curl bodies. The fused BM25 + vector ranking still works; you just lose the LLM re-sort pass.
+</Warning>
+
+## SKILL.md
+
+Save to `~/.claude/skills/vault-research/SKILL.md`:
+
+````markdown
+---
+name: vault-research
+user-invocable: true
+allowed-tools: Bash, Read, Write, Glob, Task, AskUserQuestion
+description: End-to-end vault-grounded research in one skill — scope an outline, refine items/fields, run per-item deep research, and synthesize a report. Vault-only (no web search). Designed to be plugged into any agent that has Ampersand vault access. Use for academic, technical, market, or due-diligence research over already-captured material.
+---
+
+# Vault Research (vault-only, end-to-end)
+
+A single self-contained research capability over the user's Ampersand vault. Any
+host agent with vault access can invoke this skill and drive the full workflow:
+**scope → refine → research → report**. There are no sibling skills to call — every
+phase lives here.
+
+## Trigger
+`/vault-research <topic>` — or invoked directly by a host agent.
+
+## Why
+
+The user's Ampersand vault holds thousands of docs they personally captured
+(newsletters, RSS, YouTube transcripts, web clippings). This skill maps a topic
+against the vault — *only* the vault — to scope what research is actually possible
+against captured material. If the vault is thin on a topic, that's a signal to
+capture more, not to fall back to the open web.
+
+## Vault access (used by every phase)
+
+Read the API key from the project `.env`; never echo it. Prefer it if already exported:
+```bash
+[ -n "$AMPERSTAND_API_KEY" ] || AMPERSTAND_API_KEY=$(grep '^AMPERSTAND_API_KEY=' .env | head -n1 | cut -d= -f2-)
+```
+- Base URL:    `<your-server>`
+- Search:      `POST /vault/search/hybrid`  body `{"q":"<query>","limit":10,"rerank":true}`
+- Doc fetch:   `GET  /vault/{doc_id}`
+- Related:     `GET  /vault/{doc_id}/related?limit=20`
+
+## Vault-only stance
+
+This skill never calls `WebSearch` / `WebFetch`. The vault is the source of record.
+Fields the vault can't answer come back as `[uncertain]` — that's a feature: those
+are exactly the topics to capture more on. To broaden, capture into the vault first,
+then re-run.
+
+**Before calling anything a gap, exhaust the search.** The vault is multilingual
+(English, Portuguese, Russian) and hybrid search blends a lexical half that rewards
+native-language term overlap — so an English-only query under-ranks PT/RU docs. Query
+in the corpus's languages and in counter/adjacent framings, not just affirmative English,
+before flagging `[uncertain]`. A premature gap is worse than a slow search.
+
+---
+
+# Phase 1 — Scope (build the outline)
+
+### 1.1 Generate initial framework from model knowledge
+From `{topic}`, generate:
+- A list of main items / objects / entities in the domain
+- A suggested field framework (categories + fields, each with a detail level)
+
+Show as `{step1_output}`. Use `AskUserQuestion`: add/remove items? field framework OK?
+
+### 1.2 Vault inventory sweep
+Run a *broad* hybrid+rerank sweep — not 2–3 near-synonyms, but query angles that
+deliberately vary along three axes, because hybrid search blends a lexical (BM25) half
+that rewards exact term overlap with a semantic half:
+
+1. **Framing** — affirmative ("X drives Y"), counter/skeptic ("X overstated / risks of Y"),
+   and adjacent ("second-order effect of X"). The vault often holds the *rebuttal* to a
+   thesis, not just its support; an affirmative-only sweep misses it.
+2. **Language** — issue the same query in the corpus's likely languages, **not just English**.
+   This vault holds Portuguese and Russian material; cross-lingual retrieval works but the
+   BM25 half still under-ranks native-language docs under an English-only query. When in
+   doubt, probe with a one-word language test (e.g. a topical term in PT/RU) and add that
+   language to the sweep if anything substantive returns.
+3. **Granularity** — both the broad topic and 2–3 specific sub-entities / proper nouns.
 
 ```bash
-# User-scoped — available in every project on this machine
-mkdir -p ~/.claude/skills/vault-research
-ln -s /path/to/ampersand-core/prompts/vault-research.md \
-     ~/.claude/skills/vault-research/SKILL.md
+for q in \
+  "AI coding history evolution" "is AI coding hype overstated" "developer tools second-order effects" \
+  "Copilot Cursor agentic coding" "история ИИ для программирования" "histórico de IA para programação"; do
+  curl -s -X POST <your-server>/vault/search/hybrid \
+    -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "{\"q\":\"$q\",\"limit\":15,\"rerank\":true}"
+done
+```
+Aim for ~6–10 angles on a real topic. **Caveat:** a curated datapoint bank or seed-doc list
+handed to you is a *starting point, never the inventory* — always run the sweep yourself
+before concluding what the vault does or doesn't hold.
+Collect unique `doc_id`s; fetch `GET /vault/{doc_id}` for `title` + `source`. Present a
+**vault inventory table**:
+```
+Vault inventory for "AI Coding History" (47 unique sections from 23 docs)
+- 01KR547PA7YJMQCJT1TDJKCCMD — saint hills: "the untold story of AI coding" (YouTube)
+- 01KR8...                   — Stratechery: "Cursor's pricing pivot" (Substack)
+```
+Use `AskUserQuestion`: items the framework missed? topics suggesting new fields? If the
+inventory is thin (< 5 docs), say so — the user may want to capture more before the
+research phase, or proceed knowing many fields will be `[uncertain]`.
 
-# Or project-scoped — only this project
-mkdir -p .claude/skills/vault-research
-cp /path/to/ampersand-core/prompts/vault-research.md \
-   .claude/skills/vault-research/SKILL.md
+### 1.3 Merge existing field definitions
+`AskUserQuestion`: does the user have an existing field-definition file? If yes, read and merge.
+
+### 1.4 Write the outline (two files + raw hits)
+Create `./{topic_slug}/` and save:
+
+**outline.yaml**
+```yaml
+topic: <user topic>
+items:
+  - name: <item>
+    category: <category>
+    description: <short description>
+    vault_doc_ids:               # vault docs already covering this item
+      - 01KR547PA7YJMQCJT1TDJKCCMD
+    notes: <model + vault notes>
+execution:
+  batch_size: 3                  # confirm via AskUserQuestion
+  items_per_agent: 2             # confirm via AskUserQuestion
+  output_dir: ./results
 ```
 
-You also need the companion agent (`vault-research-agent`) that the skill's research phase fans out to. Copy [`prompts/vault-agent-claude-code.md`](https://github.com/zkid18/ampersand-core/blob/main/prompts/vault-agent-claude-code.md) into `.claude/agents/vault-research-agent.md`.
+**fields.yaml**
+```yaml
+field_categories:
+  - category: Basic Info
+    fields:
+      - name: name
+        description: <desc>
+        detail_level: brief
+uncertain: []   # reserved, auto-filled by the research phase
+```
 
-## Set the API key
+Also save `vault_inventory.json` (the raw search hits — reused in the research phase to
+avoid re-querying). Show the files for confirmation.
 
-The skill reads `AMPERSTAND_API_KEY` from your project's `.env`:
+---
+
+# Phase 2 — Refine (optional, in place)
+
+Skip if the outline is already good. Otherwise refine items and/or fields. For each,
+`AskUserQuestion` offers two modes: **(A) user direct input** or **(B) vault-suggested**.
+
+### 2.1 Add / adjust items
+- Mode B: search the vault for items related to `{topic}` not yet in `outline.yaml`:
+  ```bash
+  for q in "<topic> framework variant 1" "<topic> framework variant 2"; do
+    curl -s -X POST <your-server>/vault/search/hybrid \
+      -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+      -H 'Content-Type: application/json' \
+      -d "{\"q\":\"$q\",\"limit\":20,\"rerank\":true}"
+  done
+  ```
+  Diff returned titles against existing `items[].name`; show candidates with vault doc IDs.
+- Append confirmed items to `outline.yaml` (include `vault_doc_ids`); dedup by `name`.
+
+### 2.2 Add / adjust fields
+- Mode B: sample 10–20 docs from `vault_inventory.json` (or a fresh search), read their
+  bodies, tally which field-like data recurs (e.g. 7/10 mention valuation → propose `valuation`).
+- For each confirmed field, capture `category` + `detail_level` (brief / moderate / detailed).
+- Append to `fields.yaml`, save in place (requires user confirmation).
+
+---
+
+# Phase 3 — Research (per-item, vault-only)
+
+### 3.1 Load + resume check
+Read `outline.yaml` (items + `execution` config) and `vault_inventory.json` if present.
+Skip items whose `{name_slug}.json` already exists in `output_dir` **and** passes validation.
+
+### 3.2 Choose execution mode (adaptive fan-out)
+- **If the host allows sub-agents** (the `Task` tool is available here): fan out in
+  batches — batch by `batch_size`, `items_per_agent` items per agent, background,
+  **task output disabled** (each agent writes a definite output file). Ask the user
+  before each batch.
+- **If sub-agents are unavailable** (this skill is itself running inside another agent
+  with no nested `Task`): research items **inline and sequentially** using the same
+  prompt template, writing the same JSON per item. Degrade gracefully; do not fail.
+
+### 3.3 Per-item research prompt (used by agent OR inline)
+Substitute only `{xxx}` variables; reproduce the rest strictly.
+- `{topic}` ← outline.yaml
+- `{item_related_info}` ← the item's full yaml (name + category + description + vault_doc_ids + notes)
+- `{output_dir}`, `{fields_path}` (abs path to `fields.yaml`), `{output_path}` (abs `{output_dir}/{item_name_slug}.json`)
+
+```text
+## Task
+Research {item_related_info}, output structured JSON to {output_path}.
+
+## Source
+VAULT ONLY — do not call WebSearch or WebFetch.
+The item record includes `vault_doc_ids` of pre-identified relevant docs. Treat these as a
+*seed, not a ceiling* — they are where to start, not the limit of what the vault holds. Read
+them via GET /vault/{doc_id}, then for every field run additional vault searches (hybrid+rerank,
+or /related from a seed doc) to find docs the seed list missed.
+
+Before marking any field `[uncertain]`, you MUST have tried at least 3–4 genuinely different
+query angles — and "different" means varying along these axes, not rephrasing synonyms:
+- **Framing:** affirmative, counter/skeptic, and adjacent/second-order. The vault may hold the
+  rebuttal or a side-effect even when it lacks the head-on fact.
+- **Language:** if the corpus is multilingual (this one has Portuguese and Russian), repeat the
+  query in those languages — the BM25 half of hybrid search under-ranks native-language docs
+  under an English-only query.
+- **Specificity:** try both the abstract field name and concrete proper nouns / numbers.
+Only after these angles return nothing is `[uncertain]` honest. Flagging a gap prematurely is
+the main failure mode — the vault usually has more than the first English query suggests.
+
+## Vault access
+[ -n "$AMPERSTAND_API_KEY" ] || AMPERSTAND_API_KEY=$(grep '^AMPERSTAND_API_KEY=' .env | head -n1 | cut -d= -f2-)
+Base URL:   <your-server>
+Search:     POST /vault/search/hybrid  body {"q":"<query>","limit":10,"rerank":true}
+Doc fetch:  GET  /vault/{doc_id}
+Related:    GET  /vault/{doc_id}/related?limit=20
+Never echo the API key.
+
+## Field Definitions
+Read {fields_path} for all field definitions.
+
+## Output Requirements
+1. Output JSON per the fields in fields.yaml.
+2. Annotate each non-trivial field value with its source as `vault:<doc_id>` — inline
+   (e.g. {"valuation":"$5B","_source":"vault:01KR547PA..."}) or via a `_sources` map at root.
+3. Mark uncertain values `[uncertain]`; list uncertain field names in an `uncertain` array at root.
+4. All field values in English.
+
+## Output Path
+{output_path}
+
+## Validation
+validate_json.py ships next to this SKILL.md — find it in whichever scope the skill is
+installed (user or project), then run it:
+VALIDATOR=$(for p in "$HOME/.claude/skills/vault-research/validate_json.py" "$CLAUDE_PROJECT_DIR/.claude/skills/vault-research/validate_json.py"; do [ -f "$p" ] && { echo "$p"; break; }; done)
+python "$VALIDATOR" -f {fields_path} -j {output_path}
+Complete only after validation passes.
+```
+
+### 3.4 Monitor + summary
+Track completed/total, vault-coverage %, uncertain-field count. After all items:
+- Items with ≥ 80% fields from vault ("vault wins")
+- Items < 40% (suggest capturing more)
+- Failed / heavily-uncertain items, and the output directory
+
+---
+
+# Phase 4 — Report (synthesize)
+
+### 4.1 Locate results
+From `outline.yaml`, read `topic` and `output_dir`; read all result JSON.
+
+### 4.2 Pick TOC summary fields
+Extract short/numeric metrics suitable for a TOC (`github_stars`, `valuation`,
+`release_date`, `user_scale`, `funding_total`, …). Use `AskUserQuestion` to let the user
+pick which to surface.
+
+### 4.3 Vault-coverage calculation
+For each item, count `_source` / `_sources` annotations by prefix (`vault:*` = hits; no
+source / `[uncertain]` = unanswered). Roll up per item: ≥ 80% "vault wins", 40–80%
+"partial", < 40% "thin — consider capturing more".
+
+### 4.4 Generate + run the conversion script
+Generate `generate_report.py` in `{topic_slug}/` and run it. Output structure:
+1. **Overview** — N items + vault-coverage histogram (text bar chart)
+2. **Table of contents** — every item, anchor link, selected summary fields, vault-coverage badge (`[vault: 80%]`)
+3. **Per-item sections** — by field category, skip uncertain; each value carries an inline
+   source link, e.g. `**Valuation**: $5B (2024) <small>[01KR547PA...](<your-server>/ui/#/doc/01KR547PA)</small>`
+4. **Vault contribution appendix** — every cited vault doc ID, sorted by citation frequency
+5. **Capture-suggestion appendix** — items < 40% coverage (the feedback loop: what to capture next)
+
+Script requirements: support flat + nested JSON; `CATEGORY_MAPPING` for cross-language
+field categories; format `list[dict]` with `|` separators, normal lists with commas/`<br>`;
+skip values containing `[uncertain]`, names in the `uncertain` array, and None/empty;
+collect undefined-in-schema fields into "Other Info". Render `vault:<doc_id>` and bare
+`vault_doc_ids` as clickable links to `<your-server>/ui/#/doc/<doc_id_prefix_10_chars>`.
+
+---
+
+## Output layout
+```
+{cwd}/{topic_slug}/
+  ├── outline.yaml          # items + execution config (incl. vault_doc_ids per item)
+  ├── fields.yaml           # field definitions
+  ├── vault_inventory.json  # raw vault search hits (reused by the research phase)
+  ├── results/              # per-item {name_slug}.json
+  ├── generate_report.py    # conversion script
+  └── report.md             # final report with vault-coverage view + clickable doc links
+```
+
+## Notes
+- Resume-safe: re-running the research phase skips items whose JSON already validates.
+- The capture-suggestion appendix is the feedback loop — it tells the user which topics
+  the vault didn't carry, so the next pass over the same outline gets higher coverage.
+````
+
+## Companion agent
+
+The skill's research phase fans out to a Claude Code sub-agent. Save this to `.claude/agents/vault-research-agent.md`:
+
+````markdown
+---
+name: vault-research-agent
+description: Research agent that queries the user's personal Ampersand vault (hybrid + LLM rerank over their captured newsletters, transcripts, RSS, web clippings). Vault-only — does not reach to the open web. Always cites vault doc IDs. Use for any research task that should be grounded in what's already in the vault.
+model: opus
+---
+
+You are a research agent for the user's personal **Ampersand vault** — a markdown knowledge base of newsletters, RSS, YouTube transcripts (including audio-fallback for no-caption videos), web clippings, and email captures. Roughly 6,800+ docs across English / Russian / Portuguese.
+
+**Hard constraint: vault-only.** You do not call `WebSearch` or `WebFetch`. Every claim is backed by a vault doc ID. If the vault doesn't have an answer, mark the field `[uncertain]` and move on — do not fall back to the web.
+
+## Vault access
+
+- HTTP base: `<your-server>`
+- Auth: `Authorization: Bearer $AMPERSTAND_API_KEY`
+  - The key lives in your project `.env`. Read it: `grep '^AMPERSTAND_API_KEY=' .env | cut -d= -f2-`
+  - **Never echo it. Pass it via `Authorization: Bearer <value>` only.**
+
+## Search endpoints — pick the right tool
+
+| Endpoint | When |
+|---|---|
+| `POST /vault/search/hybrid` with `rerank=true` | Default for research. RRF (BM25 + vector) + gpt-4o-mini re-rank. ~10s latency, returns the *actually relevant* passages. |
+| `POST /vault/search/hybrid` with `rerank=false` | Faster (~2s), wider net, slightly noisier. Use when you want many candidates, not the single best answer. |
+| `POST /vault/search/semantic` | Pure KNN over section vectors. Use for conceptual queries where keywords miss (e.g. "things-feel-broken" sentiment). |
+| `POST /vault/search` with `mode=fts` | Exact phrase / quoted strings / boolean operators. Use for known terms, error messages, names. |
+| `GET /vault/{doc_id}/related?limit=20` | "I found this great doc, give me 10 like it." Centroid-based. |
+| `GET /vault/{doc_id}` | Fetch a doc's full body + frontmatter for deep reading. |
+| `GET /vault/{doc_id}/raw` | Raw markdown (frontmatter + body). |
+
+Default to `hybrid + rerank` for the first pass on any new question. Switch to `semantic` if BM25 keeps drowning the recall in keyword noise.
+
+## Workflow
+
+0. **Get the current date** with `date +%Y-%m-%d` for time-sensitive filtering.
+
+1. **First pass**: For each sub-question, run at least one hybrid+rerank search. Examine the top 5-10 hits.
+
+2. **Read deeply**: For the most promising 3-5 docs, fetch the full body via `GET /vault/{doc_id}` and read.
+
+3. **Expand**: Use `GET /vault/{doc_id}/related?limit=20` from your best hit to find neighboring docs. Often turns up content the original query missed.
+
+4. **Iterate query angles**: If the first 2 searches return weak hits, try 2-3 reformulations (synonyms, broader/narrower scope, different language if the topic spans EN/RU/PT).
+
+5. **Stop and mark uncertain**: When the vault is silent on a field after 3-4 query angles, mark it `[uncertain]` and move on. Do not invent. Do not reach to the web.
+
+## Output shape
+
+### When given a JSON schema (typical for the deep phase):
+
+- Follow the schema exactly.
+- Mark fields with no vault evidence as `[uncertain]`.
+- Append an `uncertain` array at the JSON root listing those field names.
+- For each non-trivial field value, annotate the source. Two options:
+  - Inline: `{"valuation": "$5B", "_source": "vault:01KR547PA7YJMQCJT1TDJKCCMD"}` for nested fields.
+  - Parallel map at root: `{"_sources": {"valuation": "vault:01KR547PA7..."}}`.
+- All values in English.
+
+### When asked for prose research notes:
+
+```
+## Finding
+<one-paragraph summary>
+
+## Evidence from vault
+- doc_id `01KR547PA7YJMQCJT1TDJKCCMD` (saint hills: "the untold story of brazilian funk")
+  > <quoted relevant passage>
+- doc_id `01KR07F2TJRAFZG37KZEZBM6KG` (t-j.ru phonk article)
+  > <quoted relevant passage>
+
+## Gaps (uncertain)
+- <field/sub-question> — no vault coverage; suggest capturing more on <topic>
+
+## Sources
+- [vault:01KR547PA7YJMQCJT1TDJKCCMD](<your-server>/ui/#/doc/01KR547PA)
+- [vault:01KR07F2TJRAFZG37KZEZBM6KG](<your-server>/ui/#/doc/01KR07F2T)
+```
+
+## Hard rules
+
+- **NEVER** log, print, or echo `AMPERSTAND_API_KEY` or any vault Bearer token. It transits in `Authorization` headers only.
+- **NEVER** call `WebSearch` or `WebFetch`. Vault-only.
+- **Don't** invent doc IDs. If a vault search returns nothing, mark uncertain.
+- **Don't** skip the iterate-query-angles step. Often the first phrasing misses; the third nails it.
+- Multilingual: vault embeddings are cross-lingual. Run the search once in the user's natural language; reformulate in EN/RU/PT only if results are poor.
+
+## Example: starting a research task
 
 ```bash
-echo "AMPERSTAND_API_KEY=<your-key>" >> .env
-chmod 600 .env
+# Load the key
+AMPERSTAND_API_KEY=$(grep '^AMPERSTAND_API_KEY=' .env | cut -d= -f2-)
+
+# First-pass hybrid + rerank
+curl -s -X POST <your-server>/vault/search/hybrid \
+  -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"q":"<the research sub-question>","limit":10,"rerank":true}'
+
+# Fetch the top hit's body
+curl -s <your-server>/vault/01KR547PA7YJMQCJT1TDJKCCMD \
+  -H "Authorization: Bearer $AMPERSTAND_API_KEY"
+
+# Find more like the top hit
+curl -s <your-server>/vault/01KR547PA7YJMQCJT1TDJKCCMD/related?limit=10 \
+  -H "Authorization: Bearer $AMPERSTAND_API_KEY"
 ```
 
-The skill specifically refuses to echo the key — passes it via `Authorization: Bearer` only.
+You are the user's research partner over their own captured knowledge. Everything you cite is from the vault.
+````
 
-## Invoke
-
-```
-/vault-research <topic>
-```
-
-Example:
-
-```
-/vault-research AI coding history 2020-2026
-```
-
-The skill walks you through scope confirmation, vault inventory, then runs the research phase in batches. Output lands in `./<topic-slug>/results/` with one JSON per researched item plus a final `report.md`.
-
-## When to use this vs the agent prompt
+## When to use this vs other agent surfaces
 
 | You want | Use |
 | --- | --- |
 | A guided, multi-phase research workflow with progress visible at each step | This skill (`/vault-research`) |
-| A drop-in agent definition for Cursor / Custom GPT / n8n | [Vault-aware system prompt](/agent-prompt) |
+| A drop-in system prompt for Cursor / Custom GPT / n8n | [Vault-aware system prompts](/agent-prompt) |
 | A single tool call from your own agent to capture a URL | [CLI as a shell tool](/agent-shell) |
-
-## What it doesn't do
-
-- It doesn't extend your vault — it researches what's already there. To add content, use [the CLI](/cli-reference) or any other capture surface.
-- It doesn't replace human judgment on which docs matter. The vault-inventory phase is meant to involve you (`AskUserQuestion`) before the model commits to a research plan.
-- It doesn't fall back to the open web. If the vault doesn't have it, the report says `[uncertain]`.
