@@ -27,7 +27,8 @@
             "pages": [
               "concepts",
               "configuration",
-              "deployment"
+              "deployment",
+              "vault-sync-local"
             ]
           }
         ]

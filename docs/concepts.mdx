@@ -28,6 +28,60 @@ The frontmatter is the canonical metadata. SQLite holds the same fields plus ful
 
 The vault lives at `$AMPERSTAND_DATA_DIR` on the server (default: `/var/lib/amperstand/vault` in production). Clients never touch these files directly — they go through the HTTP API.
 
+### Frontmatter schema (contract)
+
+Every captured doc has these frontmatter fields. Field names and types are part of the API contract — your Dataview queries and link patterns won't silently break across releases.
+
+| Field | Type | Who sets it | Notes |
+| --- | --- | --- | --- |
+| `id` | ULID (26-char string) | **Server** | Stable, sortable, URL-safe. The only handle that survives renames and re-captures. |
+| `title` | string | Extractor; user may override | If you POST a `frontmatter: {"title": "..."}` to `/capture` or `/v1/docs`, your value wins. |
+| `source` | URL string | Server | The URL captured. Used for idempotency (re-capturing the same URL is a no-op — see below). |
+| `type` | enum: `article`, `youtube`, `linkedin`, `tweet`, `feed`, `email`, `note` | Extractor; user may override | Picked by the URL-shape detector. |
+| `created_at` | RFC3339 string (always UTC `Z`) | Server | First-capture timestamp. Never recomputed on re-write. |
+| `body_hash` | hex string (sha256 of the body bytes) | Server | Recomputed on every write. Detects edits and powers ETag responses. |
+| `tags` | list of strings | User | Empty by default. Pass via the `frontmatter` map to `/capture` or edit in place. |
+| `author` | string \| null | Extractor; user may override | Best-effort from the extractor (article byline, YouTube channel, etc.). |
+| `published_at` | RFC3339 string \| null | Extractor; user may override | The original publication date when extractable (article meta tags, feed entry date). |
+| `captured_at` | RFC3339 string | Server | Alias of `created_at`; both are emitted today for backward compatibility. |
+
+User-extensible: you can add **any other key** to the frontmatter via the `frontmatter` map on `POST /capture` (or by editing the file). The server preserves unknown keys verbatim and never strips them.
+
+### What happens on re-capture of the same URL?
+
+Re-capturing a URL the vault already has is a **no-op for everything except the body**:
+
+- The server returns the existing `doc_id` (idempotency by `source` URL).
+- The body is NOT re-extracted unless the upstream content changed (detected by HTTP `ETag` / `Last-Modified` from the source, then compared against `body_hash`).
+- Your user-added frontmatter fields (`tags`, custom keys, hand-edited `title`) are **preserved**. The server doesn't merge or overwrite them.
+
+This means **edits you make in Obsidian survive re-capture**. Your PKM vault stays yours.
+
+The only exception: if you set `force=true` on the capture request, the server treats it as a fresh capture and overwrites the body + server-controlled fields. User-added frontmatter is still preserved (server merges its fields into your existing frontmatter, doesn't replace the whole map).
+
+### Folder layout
+
+Captured docs land under `$AMPERSTAND_DATA_DIR/`:
+
+```
+$AMPERSTAND_DATA_DIR/
+├── 2026/
+│   ├── 06/
+│   │   ├── why-hardware-development-is-hard.md
+│   │   └── cursors-pricing-pivot.md
+│   └── 07/
+│       └── ...
+└── .store/
+    └── by-id/
+        ├── 01JK8XQ4.../
+        │   └── doc.md         # symlink to the year/month file
+        └── ...
+```
+
+The `YYYY/MM/<slug>.md` layout is for human browsing in Obsidian / Finder / `tree`. The `.store/by-id/` tree is for the server's internal lookups (every `doc_id` resolves there).
+
+You can't change the layout via config today. If you sync to a local Obsidian vault with its own layout convention, the [vault-sync page](/vault-sync-local) covers the rsync recipe and how to live with the year/month tree (most Dataview-driven vaults adapt fine; the alternative is forking and changing `store.py`).
+
 ## Capture surfaces
 
 A "capture surface" is a way a URL or piece of content gets into the vault. All surfaces talk HTTP to the same server, which does the actual extraction:

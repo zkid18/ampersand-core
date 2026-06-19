@@ -60,13 +60,120 @@ Caddy terminates TLS (free Let's Encrypt cert) and proxies to uvicorn on `127.0.
 
 ## Backups
 
-The vault directory is rsync'd nightly to a bucket. Markdown files compress extremely well, so even thousands of captures stay under a few MB.
+A real runbook, not a one-liner. Three things to back up; one to skip; one to verify.
+
+### What to back up
+
+| Thing | Where | Why |
+| --- | --- | --- |
+| **Vault markdown** | `/var/lib/amperstand/vault/` | The actual content. Source of truth. |
+| **Env file** | `/etc/amperstand/env` | API key, OpenAI key, IMAP creds, Telegram token. Re-installing without this means re-rotating every secret. |
+| **Classifier model + feedback** | `/var/lib/amperstand/.classifier/` | Your trained newsletter classifier + the labeled feedback that built it. Cheap to lose, expensive to re-label. |
+
+### What to skip
+
+| Thing | Why |
+| --- | --- |
+| `amperstand.db`, `amperstand.db-wal`, `amperstand.db-shm` | SQLite index — fully reconstructible from the markdown via `amperstand-admin reindex`. Backing it up is wasted bandwidth at best, and copying mid-write can produce corrupted files. |
+| `.store/by-id/` (symlinks) | Internal lookup tree. Rebuilt on first server start. |
+
+### Nightly backup (additive, off-box)
 
 ```bash
-rsync -az /var/lib/amperstand/vault/ backup-host:/backups/amperstand/
+# /etc/cron.daily/amperstand-backup — runs as root
+#!/usr/bin/env bash
+set -e
+DATE=$(date -u +%Y%m%dT%H%M%SZ)
+DEST=backup-host:/backups/amperstand
+
+# Vault markdown — additive, no --delete, so a single bad capture doesn't wipe history
+rsync -az --exclude='amperstand.db*' --exclude='.store/' \
+    /var/lib/amperstand/vault/ ${DEST}/vault/
+
+# Env file (encrypted on the way out)
+gpg --cipher-algo AES256 --symmetric --batch --passphrase-file /root/.backup-pass \
+    -o - /etc/amperstand/env \
+    | ssh ${DEST%%:*} "cat > ${DEST#*:}/env-${DATE}.gpg"
+
+# Classifier state
+rsync -az /var/lib/amperstand/.classifier/ ${DEST}/classifier/
 ```
 
-The SQLite database is **not** backed up — it's an index, fully reconstructible from the markdown files alone via `amperstand-admin reindex`.
+The env file is encrypted before it leaves the box. Don't backup secrets in plaintext.
+
+### Hot backup of SQLite (for paranoia)
+
+If you DO want a point-in-time SQLite snapshot for fast restore-without-reindex:
+
+```bash
+# Atomic — uses SQLite's online backup API; safe during writes
+sqlite3 /var/lib/amperstand/amperstand.db \
+    ".backup /tmp/amperstand-$(date +%Y%m%d).db"
+```
+
+Then rsync the resulting `.db` file. Avoid copying the live DB directly with `cp` / `rsync` — you can catch it mid-WAL-checkpoint and get an inconsistent file.
+
+### Mid-capture rsync — is it safe?
+
+Yes for the markdown files. The server writes via the atomic-rename pattern (`open(path.tmp); write; rename(path.tmp → path)`), so rsync either sees the old file or the new file, never half-written.
+
+The SQLite database is a different story — see the hot-backup note above.
+
+### Restore
+
+From a backup-host's copy:
+
+```bash
+# On a fresh droplet, after running bootstrap.sh:
+sudo systemctl stop amperstand-server
+
+# Pull the vault back
+rsync -az backup-host:/backups/amperstand/vault/ /var/lib/amperstand/vault/
+chown -R amperstand:amperstand /var/lib/amperstand/
+
+# Pull the env file (decrypt)
+ssh backup-host "cat /backups/amperstand/env-latest.gpg" \
+    | gpg --decrypt --batch --passphrase-file /root/.backup-pass \
+    > /etc/amperstand/env
+chmod 0640 /etc/amperstand/env
+chown root:amperstand /etc/amperstand/env
+
+# Rebuild the SQLite index from the markdown
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin reindex
+
+# Bring it up
+sudo systemctl start amperstand-server
+curl http://localhost/health
+```
+
+Reindex time scales with vault size — roughly 1 minute per 5,000 docs on the reference droplet (single-CPU, SQLite + embedding regen if `OPENAI_API_KEY` is set). For 50k docs, plan ~10 min of "server up but search results thin."
+
+### Retention
+
+No built-in policy. A simple shape that works:
+
+| Tier | Frequency | Keep |
+| --- | --- | --- |
+| Daily | Cron above | Last 7 |
+| Weekly | Sunday's daily, promoted | Last 4 |
+| Monthly | First-of-month, promoted | Last 12 |
+
+Implement with `tmpwatch`, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12`, or any object-storage lifecycle policy. The vault grows slowly (markdown compresses well), so storage cost is minor — long retention is cheap insurance.
+
+### Integrity check
+
+After every restore (or as a weekly cron):
+
+```bash
+# Count files and bytes; compare against pre-restore baseline
+find /var/lib/amperstand/vault -type f -name '*.md' | wc -l
+du -sh /var/lib/amperstand/vault
+
+# Verify a sample of docs against their body_hash frontmatter field
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin verify-hashes --sample 100
+```
+
+The `verify-hashes` command reads each doc's frontmatter `body_hash` and recomputes it against the file body. Discrepancies mean either: (a) someone edited the file without going through the API and didn't update the hash, or (b) the file is corrupted.
 
 ## Bootstrap script
 

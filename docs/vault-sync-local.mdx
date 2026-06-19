@@ -1,0 +1,115 @@
+---
+title: Sync the vault to a local Obsidian folder
+description: "Mirror your server's vault into an Obsidian-readable folder on your laptop. rsync, fswatch, conflict semantics."
+---
+
+The vault lives on your server, not your laptop. PKM workflows (Obsidian, Logseq, Dataview, daily notes, Git history) typically expect markdown files on the local filesystem. This page covers two ways to bridge that gap.
+
+<Note>
+This is a **one-way mirror** by default: server → laptop. Edits you make in your local Obsidian don't flow back to the server unless you opt into bidirectional sync (last section). For most users, one-way is what you want — the server is the canonical capture point, your laptop is where you read and reference.
+</Note>
+
+## One-shot pull (rsync)
+
+The simplest setup. Run this any time you want a fresh local copy:
+
+```bash
+rsync -avz --delete \
+    --exclude='vault.db*' \
+    --exclude='.store/' \
+    root@<your-server>:/var/lib/amperstand/vault/ \
+    ~/Obsidian/Amperstand/
+```
+
+Breaking it down:
+
+| Flag | Why |
+| --- | --- |
+| `-a` | Archive mode — preserves timestamps, permissions, symlinks |
+| `-v` | Verbose — see which files copied |
+| `-z` | Compress in transit — articles compress well |
+| `--delete` | Mirror semantics: if a doc was deleted on the server, delete it locally too. Drop this flag if you want additive-only sync. |
+| `--exclude='vault.db*'` | Skip the SQLite index (`vault.db`, `vault.db-wal`, `vault.db-shm`). It's a server-side artifact — rebuilding from the markdown files takes a minute via `amperstand-admin reindex`. |
+| `--exclude='.store/'` | Skip the internal by-id symlinks tree. You don't need it; it's for server lookups. |
+
+After this, `~/Obsidian/Amperstand/` is a `YYYY/MM/<slug>.md` tree that Obsidian opens as-is.
+
+### Adding it to your Obsidian vault
+
+If your Obsidian vault is at `~/Obsidian/` and you've already got daily notes / templates / settings in `~/Obsidian/`, just sync into a subfolder:
+
+```bash
+mkdir -p ~/Obsidian/Amperstand
+rsync ... ~/Obsidian/Amperstand/
+```
+
+Obsidian sees the new folder, indexes the markdown, your Dataview queries that filter on `type:: article` or `tags:: #vault` Just Work.
+
+Coexistence with `.obsidian/` is fine — the rsync exclude rules already skip the SQLite sidecar, and there's nothing else colliding.
+
+## Continuous sync (fswatch + rsync on the server)
+
+For "captures appear in my Obsidian folder within ~10 seconds of saving them":
+
+### Option A: cron, every 5 minutes
+
+Dead simple, no daemon:
+
+```bash
+# laptop crontab -e
+*/5 * * * * rsync -az --delete --exclude='vault.db*' --exclude='.store/' root@<your-server>:/var/lib/amperstand/vault/ ~/Obsidian/Amperstand/ >/dev/null 2>&1
+```
+
+Latency: 0–5 minutes. Battery: imperceptible.
+
+### Option B: server-side push
+
+If your laptop has a stable hostname / IP from the server's perspective:
+
+```bash
+# on the server, /opt/amperstand/sync-laptop.sh
+#!/bin/bash
+rsync -az --delete --exclude='vault.db*' --exclude='.store/' \
+    /var/lib/amperstand/vault/ \
+    you@your-laptop:~/Obsidian/Amperstand/
+```
+
+Triggered by the existing `amperstand-vault-watcher.service` (it already fires on file changes via watchdog). Add a hook in the server config; PR welcome — this isn't built today as a first-class feature, but a custom watcher script works.
+
+### Option C: Syncthing
+
+If you don't want to manage rsync at all, run Syncthing on both server and laptop, share the vault folder. Conflict-aware, encrypted-in-transit, no shell scripting. Tradeoff: extra daemon on the server.
+
+## What about the SQLite index?
+
+Skip it. The `vault.db` file plus its WAL companions (`vault.db-wal`, `vault.db-shm`) are derived from the markdown files. Rsync-ing them is at best wasted bandwidth, at worst causes "database disk image is malformed" errors if you copy mid-write.
+
+If you want a local SQLite for offline querying, run `amperstand-admin reindex` against your local Obsidian folder — rebuilds from the markdown. But for most PKM use, you don't need it; Obsidian's Dataview / search reads the markdown directly.
+
+## Conflict semantics — what happens if I edit a synced file in Obsidian?
+
+With **one-way pull (`rsync --delete`)**: your laptop edits get **overwritten on the next sync**. The server is canonical; your laptop is a mirror.
+
+Without `--delete` and without bidirectional sync: your local edits persist, but they're invisible to the server. The next time you re-capture the same URL, the server overwrites *its* version (with your previous edits-via-API preserved, server-managed fields refreshed) — and the next rsync pulls that down, overwriting your local hand-edits.
+
+### Bidirectional sync (advanced)
+
+For "I want to edit in Obsidian AND have those edits flow back to the server":
+
+1. Use Syncthing or rclone with proper conflict-resolution rules
+2. Tell the server about your laptop changes via the HTTP API — `PUT /v1/docs/{id}` with the new body
+3. Or run the server's `amperstand-vault-watcher.service` against the synced folder (watches for filesystem changes and re-indexes)
+
+Honest assessment: this works but it's not turnkey. For most users, **one-way mirror + edits via the API (e.g. `amperstand capture` re-sending a URL with updated `frontmatter: {tags: [...]}`)** is more reliable than two-way file sync.
+
+## Things that won't work today
+
+- **Live Obsidian-edits-as-source-of-truth.** The server's idea of the vault drifts from your Obsidian if you only edit locally.
+- **Cherry-picking which docs sync.** rsync is "all or none of this folder" — you can't say "only `type: article`" without scripting around rsync.
+- **Multi-laptop sync** with each laptop having its own private edits. Use Syncthing if you need this; conflict files (`.conflict-<host>.md`) become your friend.
+
+## Recommended setup
+
+If you're a PKM power user: cron every 5 min, mirror into an Obsidian subfolder, do your reading and queries on the laptop, do your capturing through the CLI or Telegram bot (which write to the server). Edits to existing docs go through the API. Local Obsidian is the read surface; server is the write surface.
+
+This is the cleanest mental model and the one the vault was designed for.

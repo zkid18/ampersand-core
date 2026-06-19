@@ -103,3 +103,76 @@ http://your-server/ui/#/doc/<doc_id>
 ```
 
 (The web UI accepts that path and opens the doc.)
+
+## Citing vault docs in a public piece (newsletter, paper, post)
+
+The `[doc_id]` markers and the `your-server/ui/#/doc/<id>` URL are **internal** — they only work for you (or anyone you've handed the API key). For published work, your readers can't follow either one. They need the **original source URL**.
+
+Every vault doc carries this in frontmatter as `source:`. The flow to turn an internal citation into a publication-ready footnote:
+
+```bash
+# Your agent / skill cites a finding as [01JK8XQ4...]
+# To turn that into a footnote, fetch the doc and read its source:
+
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     https://your-server/v1/docs/01JK8XQ4...
+
+# Response includes:
+#   "source": "https://danluu.com/why-hardware-development-is-hard/",
+#   "title":  "Why hardware development is hard",
+#   "author": "Dan Luu",
+#   "published_at": "2024-08-12T00:00:00Z"
+```
+
+That's everything you need for a real footnote:
+
+> ¹ Luu, Dan. *Why hardware development is hard*. danluu.com, August 2024. `https://danluu.com/why-hardware-development-is-hard/`
+
+### Footnote-helper pattern
+
+For agents that produce drafts directly: add a "render citations for publication" step at the end. Pseudocode:
+
+```python
+# After the LLM produces a draft with [01JK8XQ4...] markers
+import re, httpx, os
+
+doc_ids = set(re.findall(r"\[([0-9A-Z]{26})\]", draft))
+footnotes = []
+for i, doc_id in enumerate(sorted(doc_ids), start=1):
+    doc = httpx.get(
+        f"https://your-server/v1/docs/{doc_id}",
+        headers={"Authorization": f"Bearer {os.environ['AMPERSTAND_API_KEY']}"},
+    ).json()
+    fm = doc["frontmatter"]
+    footnotes.append(
+        f"{i}. {fm.get('author','Unknown')}. "
+        f"*{fm['title']}*. {fm.get('source')}. "
+        f"Published: {fm.get('published_at','n.d.')}."
+    )
+    draft = draft.replace(f"[{doc_id}]", f"[^{i}]")
+
+print(draft)
+print("\n---\n")
+print("\n".join(footnotes))
+```
+
+This converts the LLM's internal `[doc_id]` markers into proper `[^1]`-style footnote references and emits a publication-ready footnote block. Paste that into your draft.
+
+### What if the original source went away?
+
+For dead links (404, paywalled, site shut down), cite from a snapshot. The vault has the captured markdown — the *content* survives even when the URL doesn't. Two patterns that journalists / academics typically prefer:
+
+- Cite the original URL + add `[Wayback: <wayback-url>]` if you've snapshotted it
+- Cite the original URL + add a quote in the footnote so a reader can verify the substance without following the dead link
+
+The vault doesn't auto-snapshot to the Wayback Machine today. Manual: `curl https://web.archive.org/save/<original-url>` and paste the resulting URL into your footnote.
+
+### Don't paste the doc-id URL
+
+It's tempting to drop `https://your-server/ui/#/doc/01JK8XQ4...` into a footnote because it's the URL the agent gave you. **Don't:**
+
+- It doxxes your server's hostname/IP
+- It returns 401 to anyone without your API key
+- The doc-id changes if you rebuild the vault from scratch (re-import path); a re-cite would 404
+
+The `source:` field is the real, durable, publication-correct citation. Treat `[doc_id]` as **internal scratchwork** and `source` as **the only thing that goes in print**.
