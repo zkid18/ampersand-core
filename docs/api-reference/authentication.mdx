@@ -1,6 +1,6 @@
 ---
 title: Authentication
-description: "Bearer tokens, how to rotate them, what not to do."
+description: "Bearer tokens, how they're generated, how to rotate them, what they grant."
 ---
 
 Every endpoint (except `/health`) requires:
@@ -9,68 +9,116 @@ Every endpoint (except `/health`) requires:
 Authorization: Bearer <AMPERSTAND_API_KEY>
 ```
 
-The key is generated at server install and stored at `/etc/amperstand/env` on the server, mode `0640`, owned by `root:amperstand`.
+There is one key for the whole server. It's stored at `/etc/amperstand/env`, mode `0640`, owned by `root:amperstand`. No per-user, per-client, or per-scope keys today.
 
-## Generating a key
+## How the key is generated
 
 ```bash
 openssl rand -hex 32
 ```
 
-64 hex chars. Enough entropy that brute force is uninteresting.
+What that does:
 
-## Storing it on the client
+- `openssl rand` reads **32 random bytes from the OS kernel's CSPRNG** (`/dev/urandom` on Linux). Generation never touches the network — the entropy is local.
+- `-hex` encodes those bytes as 64 hex characters so the key is safe to put in env files, URLs, headers, etc.
+
+64 hex chars × 4 bits = **256 bits of entropy**. Brute-forcing a 256-bit secret is more expensive than the energy budget of the observable universe — you don't need to invent your own key; this command is correct.
+
+The `bootstrap.sh` script runs this once on first install and writes the result to `/etc/amperstand/env`. It prints the key once to stdout so you can copy it. After that, you can retrieve it from the server filesystem (`grep AMPERSTAND_API_KEY /etc/amperstand/env`).
+
+## Threat model — what the key grants
+
+The bearer token is a **master key**. Anyone holding it can:
+
+- Read every doc in the vault (`GET /v1/docs`, `GET /v1/docs/{id}`)
+- Capture new docs from any URL (`POST /capture`)
+- Modify existing docs (`PUT /v1/docs/{id}`)
+- Delete docs (`DELETE /v1/docs/{id}` — hard delete, no trash)
+- Run arbitrary search and chat queries against your corpus (`POST /v1/docs/search/*`, `POST /v1/chat`)
+
+There's **no scope, no read-only mode, no per-client identity**. If you give the bearer to the Telegram bot, the bot can also delete things.
+
+This is fine for a single-operator personal box. It is NOT fine for:
+- Multi-user deployments
+- Exposing the API to clients you don't trust 100% (third-party agents, untrusted browser extensions)
+- Anything you'd treat as a hosted product
+
+Per-key scopes and per-client identity are on the roadmap; not built yet.
+
+## Storing the key on a client
 
 <Tabs>
   <Tab title="CLI (recommended)">
     ```bash
-    # Save the key to a 0600 file
+    # Save the key to a 0600 file (only your user can read it)
     echo "<the-key>" > ~/.amperstand-api-key
     chmod 600 ~/.amperstand-api-key
 
-    # Export it in your shell rc
+    # Export from your shell rc so it loads in every new shell
     echo 'export AMPERSTAND_API_KEY="$(cat ~/.amperstand-api-key | tr -d "\n")"' >> ~/.zshrc
 
-    # Point the CLI at the env var NAME
-    amperstand vault backend set-http http://your-server \
+    # Point the CLI at the env var NAME (not the value!)
+    amperstand vault backend set-http https://your-server \
         --api-key-env AMPERSTAND_API_KEY
     ```
 
-    The CLI stores the **env var name** in `~/.amperstand/config.json`, not the value. Rotating is just re-export.
+    The CLI stores the **env var name** (`AMPERSTAND_API_KEY`) in `~/.amperstand/config.json`, not the literal value. Rotating the key means changing what `AMPERSTAND_API_KEY` resolves to in your shell — the config file doesn't move.
   </Tab>
   <Tab title="Bot / extension">
-    Set `AMPERSTAND_API_KEY` in the process environment. For the production bot, it lives in `/etc/amperstand/env` (the same file the server reads).
+    Set `AMPERSTAND_API_KEY` in the process environment. The Telegram bot reads it from `/etc/amperstand/env` via its systemd unit — the same file the server reads, so rotation is one-shot.
+
+    The Chrome extension stores the key in `chrome.storage.sync` (encrypted by the browser at rest). Rotation requires re-pasting in the extension's options page.
   </Tab>
   <Tab title="curl / scripts">
     ```bash
     curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
          https://your-server/health
     ```
+
+    Never inline the key into the URL or echo it. Bash variables stay out of `ps aux`; URL paths don't.
   </Tab>
 </Tabs>
 
 <Warning>
-**Never pass the key value directly as `--api-key-env`.** That flag takes the *name* of an env var. Passing the value (e.g. `--api-key-env 9b0d3b09...`) lands the key in `config.json`, shell history, and command logs.
+**Never pass the key value to `--api-key-env`.** That flag takes the *name* of an env var. Passing the value (`--api-key-env 9b0d3b09...`) writes the key into `~/.amperstand/config.json` AND into your shell history file — both are recoverable later by anyone with disk access.
 </Warning>
 
-## Rotating a key
+## Rotating the key
 
 ```bash
 ssh root@your-server
 NEW=$(openssl rand -hex 32)
-sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW}/" /etc/amperstand/env
-systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
+sudo sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW}/" /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
 echo "$NEW"
 ```
 
-Then update every client. All existing connections are dropped on restart.
+The restart drops every existing connection — all clients holding the old key get `401 Unauthorized` until they swap to the new one. There's no grace period.
+
+After rotating, update every client:
+- CLI: re-export `AMPERSTAND_API_KEY` in each shell (or restart your terminal if it's in your rc)
+- Bot: it reads from `/etc/amperstand/env` on the server, so the rotation already updated it — the restart in the script above also restarted the bot
+- Extension: paste the new key into the options page on every browser running it
+- Custom clients / agents: whatever config mechanism they use
 
 ## If a key leaks
 
-Don't audit first. Rotate first.
+**Rotate first, audit second.**
 
-1. Rotate on the server (above)
+1. Run the rotation above
 2. Update every client
-3. Then check logs to see whether anything happened in the window
+3. *Then* check logs: `sudo journalctl -u amperstand-server | grep <suspicious-IP>` or similar
 
-The cost of rotation is small (one minute, no data loss). The cost of leaving a leaked key live is potentially much larger.
+The cost of rotation is one minute and zero data loss. The cost of leaving a leaked key live is potentially the entire contents of your vault. Always trade the way that math works out.
+
+## Why one shared key (and what to do if you need more)
+
+The single-key design is intentional for a single-operator personal box: simpler config, one secret to rotate, one place to check.
+
+If you need per-client distinction today:
+
+- Run **separate amperstand-core servers** for separate trust domains (one for your personal vault, one for a shared family vault, etc.)
+- Or front the server with a **reverse-proxy auth layer** (Caddy + `forward_auth`, oauth2-proxy, Authelia) that gates the bearer token behind a higher-level identity check
+- Or accept the limitation and don't expose the bearer to anything you don't fully trust
+
+Native per-key scopes (`read-only`, `capture-only`, etc.) are on the roadmap. Not built.
