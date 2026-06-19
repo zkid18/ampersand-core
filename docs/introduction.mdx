@@ -49,15 +49,6 @@ You run it once on a $4 droplet (or your home server), then connect any number o
 
 Every client speaks HTTP. The server is the only thing that touches your vault files.
 
-## Two PyPI packages, one product
-
-| Package | What it is | Where it runs |
-| --- | --- | --- |
-| **[`amperstand-core`](https://pypi.org/project/amperstand-core/)** | The server. Engine + extractors + vault store + REST API + `amperstand-admin` console script | One install on your server / droplet |
-| **[`amperstand`](https://pypi.org/project/amperstand/)** | The CLI client. HTTP-only — talks to your server | One install per laptop |
-
-The two packages don't import each other. They communicate over the network like `postgres` and `psql`.
-
 ## What it captures
 
 | Surface | Extractor |
