@@ -30,15 +30,13 @@ That's the entire architecture. One server. N clients. HTTP between them.
                                │  HTTP + API key
                                │
                        ┌───────▼──────────┐
-                       │                  │
                        │  amperstand-core │   ← the server
-                       │   (FastAPI)      │
                        │                  │
-                       │  extractors      │   trafilatura, yt-dlp,
-                       │  vault store     │   feedparser, IMAP, …
+                       │  extractors      │
+                       │  vault store     │
                        │  feed registry   │
-                       │  job queue       │   async capture
-                       │  search index    │   FTS5 + sqlite-vec
+                       │  job queue       │
+                       │  search index    │
                        └────────┬─────────┘
                                 │
                                 │  reads & writes
