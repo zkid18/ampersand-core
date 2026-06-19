@@ -1,0 +1,122 @@
+---
+title: Telegram bot
+description: "How the reference Telegram bot uses the HTTP API. ~600 LoC of Python."
+---
+
+[`zkid18/amperstand-tg-bot`](https://github.com/zkid18/ampersand-tg-bot) is the reference Telegram client. It talks to your server over HTTP, supports text + URL capture, search, and a few admin commands. Long-polling, runs anywhere — your laptop, the same droplet as the server, or a separate box.
+
+Use this as a starting point for any chat-based client (Discord, Slack, IRC — same shape).
+
+## What it does
+
+| User action | Bot behavior |
+| --- | --- |
+| DMs a URL alone | POST `/capture` → reply with saved doc ID |
+| DMs text | POST `/v1/docs` with the text as body, first line as title |
+| `/list` | GET `/v1/docs?limit=10` |
+| `/get <id-prefix>` | GET `/v1/docs/{id}` |
+| `/search <query>` | POST `/v1/docs/search/hybrid` |
+| `/whoami` | Returns the user's Telegram numeric ID (for the allowlist) |
+
+## Project structure
+
+```
+amperstand-bot/src/amperstand_bot/
+├── bot.py              ← main entry; wires handlers, starts long-poll
+├── client.py           ← `VaultClient` — async httpx wrapper (~150 LoC)
+├── auth.py             ← BOT_ALLOWED_USER_IDS allowlist check
+├── config.py           ← env var loading
+└── handlers/
+    ├── capture.py      ← text/URL → vault
+    ├── search.py       ← /search command
+    ├── query.py        ← /list, /get
+    ├── delete.py       ← undo button on captures
+    ├── admin.py        ← /whoami, /help
+    └── _telegram.py    ← shared keyboard / reply helpers
+```
+
+**Imports nothing from `amperstand-core`.** The bot is pure HTTP — it could be rewritten in Go, Rust, or Node without losing any functionality.
+
+## The HTTP client (worth copying)
+
+```python
+# amperstand_bot/client.py — abridged
+import httpx
+
+class VaultClient:
+    def __init__(self, base_url: str, api_key: str, *, timeout: float = 30.0) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+
+    async def capture(self, url: str) -> dict:
+        r = await self._client.post("/capture", json={"url": url})
+        r.raise_for_status()
+        return r.json()
+
+    async def list_docs(self, limit: int = 10) -> list[dict]:
+        r = await self._client.get(f"/v1/docs?limit={limit}")
+        r.raise_for_status()
+        return r.json()["items"]
+
+    async def search(self, q: str, limit: int = 10, rerank: bool = True) -> list[dict]:
+        r = await self._client.post(
+            "/v1/docs/search/hybrid",
+            json={"q": q, "limit": limit, "rerank": rerank},
+        )
+        r.raise_for_status()
+        return r.json()["items"]
+
+    async def close(self) -> None:
+        await self._client.aclose()
+```
+
+One client per process. All endpoints take `Authorization: Bearer <key>` from the constructor. No per-call auth overhead.
+
+## Setup
+
+```bash
+git clone https://github.com/zkid18/ampersand-tg-bot
+cd ampersand-tg-bot
+cp .env.example .env
+# edit .env
+pip install -e .
+amperstand-bot
+```
+
+Required env vars:
+
+| Var | What |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
+| `AMPERSTAND_BASE_URL` | Your server, e.g. `http://your-droplet:8765` |
+| `AMPERSTAND_API_KEY` | Your server's bearer token |
+| `BOT_ALLOWED_USER_IDS` | Comma-sep Telegram numeric IDs (optional but recommended) |
+
+Discover your Telegram ID by leaving `BOT_ALLOWED_USER_IDS=` empty, message the bot `/whoami`, paste the returned number back, restart.
+
+## Production deployment
+
+The bot ships with a systemd unit at `deploy/systemd/amperstand-tg-bot.service` — same hardening profile as the server (`ProtectSystem=strict`, `PrivateTmp`, etc.). The bot can run as the same `amperstand` user that runs the server.
+
+```ini
+[Unit]
+Requires=amperstand-server.service
+After=amperstand-server.service network-online.target
+
+[Service]
+User=amperstand
+EnvironmentFile=/etc/amperstand/env
+ExecStart=/opt/amperstand/venv/bin/amperstand-bot
+```
+
+It reads from the same `/etc/amperstand/env` as the server, so the API key only lives in one place.
+
+## What to copy if you're building a similar client
+
+- **One `VaultClient` per process**, not per request — keeps the connection pool warm.
+- **Bearer auth via constructor**, not per-call — DRY and prevents key leaks.
+- **Use the async endpoints (`/capture/async`)** for any chat surface where users expect immediate feedback. Then push a "saved!" reply once the job finishes.
+- **The allowlist is your firewall** — the API key is shared across all clients, so per-user gating must happen at the client layer.

@@ -60,12 +60,6 @@
         "tab": "Build clients",
         "groups": [
           {
-            "group": "Build",
-            "pages": [
-              "build-client"
-            ]
-          },
-          {
             "group": "API reference",
             "pages": [
               "api-reference/overview",
@@ -75,6 +69,14 @@
               "api-reference/vault-docs",
               "api-reference/vault-search",
               "api-reference/feeds"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/telegram-bot",
+              "examples/browser-extension",
+              "examples/build-your-own"
             ]
           }
         ]

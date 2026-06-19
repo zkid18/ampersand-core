@@ -1,0 +1,89 @@
+---
+title: Browser extension
+description: "How the reference Chrome extension captures pages. ~300 LoC of vanilla JavaScript."
+---
+
+[`zkid18/amperstand-extension`](https://github.com/zkid18/ampersand-extension) is the reference Chrome client. One click on any page → it sends the rendered HTML to your server, the server runs the extractor, the doc lands in your vault.
+
+Manifest V3, no frameworks, no build step. Use this as a starting point for any browser client (Firefox, Edge, Safari Web Extensions all support similar APIs).
+
+## What it does
+
+| User action | Extension behavior |
+| --- | --- |
+| Click the toolbar icon | POST `/capture/html/async` with the page's rendered HTML |
+| Configure (options page) | Save server URL + API key to `chrome.storage.sync` |
+| Health check (options page) | GET `/health` to confirm the server is reachable |
+
+## Why send HTML instead of just the URL?
+
+The extension has access to the page **after** JavaScript has run. Many modern sites (Substack archive views, Medium, anything SPA-shaped) don't render meaningful content in the raw HTML — only after the page has hydrated. By sending the post-render DOM, the server can extract content from pages it couldn't fetch itself.
+
+YouTube and LinkedIn URLs are special-cased on the server — those go through their URL-specific extractors regardless of supplied HTML.
+
+## Project structure
+
+```
+amperstand-extension/
+├── manifest.json       ← MV3 config; permissions, scripts, action button
+├── background.js       ← service worker; receives clip requests
+├── clip.js             ← content script; grabs the rendered DOM
+├── popup.html / .js    ← toolbar popup UI (shows recent clips, errors)
+├── options.html / .js  ← settings page (server URL, API key, /health probe)
+└── icons/              ← toolbar + settings icons
+```
+
+## The capture flow
+
+```js
+// clip.js — abridged
+async function clipPage() {
+  const { serverUrl, apiKey } = await chrome.storage.sync.get(["serverUrl", "apiKey"]);
+  const html = document.documentElement.outerHTML;
+  const title = document.title;
+  const url = window.location.href;
+
+  const r = await fetch(`${serverUrl}/capture/html/async`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url, html, title }),
+  });
+  const { job_id } = await r.json();   // 202 response
+
+  // Optional: poll /jobs/{id} for done/failed → toast notification
+}
+```
+
+## Why async (`/capture/html/async`)?
+
+The extension's popup closes the moment the user clicks elsewhere. A sync `/capture/html` call that hangs for 30 seconds on a YouTube video would leave the popup spinner stuck or vanish silently. The async endpoint returns 202 + `{job_id}` in < 100ms, and the extension can poll `/jobs/{id}` from the background service worker to surface a notification when the capture finishes.
+
+## Setup
+
+```bash
+git clone https://github.com/zkid18/ampersand-extension
+# Then in Chrome:
+# 1. chrome://extensions
+# 2. Developer mode → on
+# 3. Load unpacked → select the cloned folder
+# 4. Click the new icon → options → paste server URL + API key
+# 5. Click "Test connection" → should show "healthy"
+```
+
+No build step. Edit a JS file, click the reload icon in `chrome://extensions`, you're done.
+
+## Key storage
+
+Settings live in `chrome.storage.sync` (synced across the user's Chrome devices). The API key is stored as plaintext in extension storage — Chrome encrypts the storage at rest but a malicious extension on the same browser could read it. **Don't reuse this key for other services.**
+
+For production, rotate the server's `AMPERSTAND_API_KEY` periodically and re-paste in the extension options.
+
+## What to copy if you're building a similar client
+
+- **Send post-render HTML, not just the URL**, for SPA-heavy pages. The server's URL-based extractors fall back to fetching the page themselves; the extension has a better view.
+- **Always use the async endpoints in UIs that can close** (popups, share sheets, mobile). The user shouldn't have to keep the UI open for 60 seconds.
+- **`chrome.storage.sync` for config**, not `localStorage` — it persists across reinstall and syncs across the user's devices.
+- **One options page, one popup**. Resist building a "mini UI" in the popup. The popup is for confirmations; the options page is for config; everything else lives in the vault.
