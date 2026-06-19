@@ -46,6 +46,7 @@ dev = [
 ]
 
 [project.scripts]
+amperstand-server = "amperstand_core.server.__main__:main"
 amperstand-admin = "amperstand_core.server.admin_cli.cli:app"
 
 [tool.hatch.build.targets.wheel]
