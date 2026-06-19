@@ -1,0 +1,137 @@
+---
+title: Vault documents
+description: "CRUD on the markdown files in your vault."
+---
+
+The vault is mounted at `/v1/docs`. Every endpoint expects a Bearer token.
+
+## GET /v1/docs
+
+List documents in the vault, newest first.
+
+```bash
+curl -H "Authorization: Bearer $KEY" \
+     "http://localhost:8765/v1/docs?limit=20&type=article"
+```
+
+### Query parameters
+
+| Param | Type | Default | What |
+| --- | --- | --- | --- |
+| `limit` | int 1–500 | `50` | Max rows |
+| `type` | string | (all) | Filter: `article`, `youtube`, `linkedin`, `tweet`, `feed`, `email`, `note` |
+| `since` | ISO timestamp | (all time) | Only docs created after |
+
+### Response
+
+```json
+{
+  "items": [
+    {
+      "id": "01JK...",
+      "title": "...",
+      "source": "https://...",
+      "type": "article",
+      "created_at": "2026-06-19T19:01:59Z",
+      "path": "vault/2026/06/...md"
+    }
+  ],
+  "total": 142
+}
+```
+
+## POST /v1/docs
+
+Create a doc from raw markdown (skips the extractor — use this for hand-written notes, or anything the bot's free-text path produces).
+
+```bash
+curl -X POST http://localhost:8765/v1/docs \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "content": "# Quick thought\n\nThe vault is just files.",
+      "frontmatter": {"type": "note", "tags": ["meta"]}
+    }'
+```
+
+Returns the created doc (same shape as `GET /v1/docs/{id}` below) with status `201`.
+
+## GET /v1/docs/{doc_id}
+
+Fetch a single doc, frontmatter + body parsed.
+
+```json
+{
+  "id": "01JK...",
+  "title": "Why hardware development is hard",
+  "source": "https://danluu.com/...",
+  "type": "article",
+  "created_at": "2026-06-19T19:01:59Z",
+  "path": "vault/2026/06/...md",
+  "body_hash": "a3f2d1...",
+  "frontmatter": { "title": "...", "tags": [...], ... },
+  "body": "...markdown content..."
+}
+```
+
+## GET /v1/docs/{doc_id}/raw
+
+Same content, served as `text/plain` (the literal `.md` file bytes including frontmatter). Useful for piping into editors.
+
+```bash
+curl -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/docs/01JK.../raw > note.md
+```
+
+## PUT /v1/docs/{doc_id}
+
+Replace the body. The `id`, `created_at`, and `body_hash` are server-controlled — they're recomputed.
+
+```bash
+curl -X PUT http://localhost:8765/v1/docs/01JK... \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"content": "# Updated body\n\n..."}'
+```
+
+## DELETE /v1/docs/{doc_id}
+
+Removes the row from the index AND the markdown file from disk. Returns `204`.
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $KEY" \
+    http://localhost:8765/v1/docs/01JK...
+```
+
+<Warning>
+Hard delete — no soft-delete trash. If you might want it back, copy the file first.
+</Warning>
+
+## Assets
+
+Captured pages can have image attachments (article inline images, YouTube thumbnails). They live under the doc's asset directory.
+
+### POST /v1/docs/{doc_id}/assets/{filename}
+
+Upload (or overwrite) an asset. Body is raw bytes.
+
+```bash
+curl -X POST http://localhost:8765/v1/docs/01JK.../assets/cover.png \
+    -H "Authorization: Bearer $KEY" \
+    --data-binary @cover.png
+```
+
+### GET /v1/docs/{doc_id}/assets/{filename}
+
+Download the asset. Standard Content-Type negotiation.
+
+## GET /v1/docs/{doc_id}/related
+
+Returns up to 10 docs that are most similar by embedding. Same response shape as [search](/api-reference/vault-search).
+
+```bash
+curl -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/docs/01JK.../related
+```
+
+Useful for "what else have I saved about this?" — Telegram bot uses it for follow-up suggestions.

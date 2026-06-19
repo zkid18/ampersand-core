@@ -1,0 +1,128 @@
+---
+title: Feeds
+description: "Server-side RSS/Atom subscription registry."
+---
+
+The feed registry is a SQLite table of subscriptions. The server polls them on a schedule, and every client (CLI, bot, extension) reads the same list.
+
+## POST /v1/feeds/preview
+
+Inspect a feed URL **without** subscribing — title, item count, sample entries. Useful for the "add feed" UI to show what the user is about to subscribe to.
+
+```bash
+curl -X POST http://localhost:8765/v1/feeds/preview \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"url":"https://danluu.com/atom.xml"}'
+```
+
+### Response
+
+```json
+{
+  "title": "Dan Luu",
+  "item_count": 73,
+  "sample": [
+    {"title": "...", "url": "...", "published": "2026-05-20T..."}
+  ]
+}
+```
+
+## POST /v1/feeds/register
+
+Subscribe to a feed.
+
+```bash
+curl -X POST http://localhost:8765/v1/feeds/register \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"url":"https://danluu.com/atom.xml", "label":"Dan Luu"}'
+```
+
+### Response (201)
+
+```json
+{
+  "feed_id": "01JK...",
+  "url": "https://danluu.com/atom.xml",
+  "label": "Dan Luu",
+  "enabled": true,
+  "last_sync": null,
+  "last_status": null
+}
+```
+
+## GET /v1/feeds
+
+List all subscriptions.
+
+```bash
+curl -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/feeds
+```
+
+### Response
+
+```json
+{
+  "items": [
+    {
+      "feed_id": "01JK...",
+      "url": "https://danluu.com/atom.xml",
+      "label": "Dan Luu",
+      "enabled": true,
+      "last_sync": "2026-06-19T19:01:59Z",
+      "last_status": "ok",
+      "item_count": 73
+    }
+  ]
+}
+```
+
+## DELETE /v1/feeds/{feed_id}
+
+Unsubscribe. Returns `204`. Captured items remain in the vault — only the subscription is removed.
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/feeds/01JK...
+```
+
+## POST /v1/feeds/{feed_id}/disable · POST /v1/feeds/{feed_id}/enable
+
+Temporarily pause / resume a subscription without losing its history. Both return the updated feed row.
+
+```bash
+curl -X POST -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/feeds/01JK.../disable
+```
+
+## POST /v1/feeds/sync
+
+Run a one-shot sync across all enabled feeds. Returns counts. Typically the server runs this on a cron internally; this endpoint lets you trigger it manually.
+
+```bash
+curl -X POST -H "Authorization: Bearer $KEY" \
+     http://localhost:8765/v1/feeds/sync
+```
+
+### Response
+
+```json
+{
+  "feeds_synced": 12,
+  "new_items": 7,
+  "errors": []
+}
+```
+
+## POST /v1/feeds/ingest
+
+Lower-level: ingest a single feed URL right now without registering it. The server fetches, parses, and persists each item. Useful for one-off imports.
+
+```bash
+curl -X POST http://localhost:8765/v1/feeds/ingest \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"url":"https://example.com/feed.xml"}'
+```

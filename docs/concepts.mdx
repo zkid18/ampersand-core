@@ -1,0 +1,96 @@
+---
+title: Concepts
+description: "The five things you need to know to think about Amperstand."
+---
+
+## The vault
+
+The vault is **a folder of markdown files plus a sidecar SQLite database**. Files are the source of truth; SQLite is an index you can drop and rebuild from the files alone.
+
+Every captured doc looks like this on disk:
+
+```markdown
+---
+id: 01JK8XQ4...        # ULID — sortable, URL-safe, the only stable handle
+title: Why hardware development is hard
+source: https://danluu.com/...
+type: article
+created_at: 2026-06-19T19:01:59Z
+body_hash: a3f2d1...    # content hash; used to detect edits
+---
+
+# Why hardware development is hard
+
+...markdown body...
+```
+
+The frontmatter is the canonical metadata. SQLite holds the same fields plus full-text and vector indexes for search.
+
+## Capture surfaces
+
+A "capture surface" is a way Amperstand picks up content. They share the same extraction pipeline but differ in how the URL/content arrives:
+
+| Surface | Trigger | Latency |
+| --- | --- | --- |
+| **CLI sync** | `amperstand capture <url>` | Blocking, 5–60s depending on source |
+| **HTTP `/capture`** | POST from client | Blocking, same as above |
+| **HTTP `/capture/async`** | POST returns 202 + job_id | Non-blocking; worker processes in background |
+| **Telegram bot** | Send URL to the bot chat | Async via `/capture/async` under the hood |
+| **Browser extension** | One-click on any page | Async; sends rendered HTML so JS-heavy pages work |
+| **Feed sync** | Cron / `amperstand feed sync` | Per-item; runs serial |
+| **Email watch** | systemd loop polling IMAP | Async per message |
+
+The async path exists because YouTube/long articles can take 30–120 seconds, and you don't want a Telegram bot popup hanging that long.
+
+## Feed registry
+
+Subscribed RSS/Atom feeds live in a server-side **feed registry** — a SQLite table with `feed_id`, `url`, `last_sync`, `etag`, `last_status`. The CLI's `feed add` writes to this registry; the sync job reads from it.
+
+Why server-side? So multiple clients (CLI on laptop + Telegram bot + extension) see the same subscription list. Local mode keeps the registry in `~/.amperstand/state.json` instead.
+
+## Search modes
+
+Three modes, increasing in cost and quality:
+
+<Tabs>
+  <Tab title="Keyword (FTS5)">
+    Pure SQLite full-text search. Sub-millisecond, no embeddings needed. Best for exact phrases or known terminology.
+
+    ```bash
+    curl -X POST $URL/v1/docs/search \
+        -H "Authorization: Bearer $KEY" \
+        -d '{"q":"hardware development", "limit":10}'
+    ```
+  </Tab>
+  <Tab title="Semantic (sqlite-vec)">
+    Embedding similarity using `sqlite-vec`. Finds conceptually-related docs that don't share words. ~50ms per query.
+
+    ```bash
+    curl -X POST $URL/v1/docs/search/semantic \
+        -H "Authorization: Bearer $KEY" \
+        -d '{"q":"what makes building chips slow", "limit":10}'
+    ```
+  </Tab>
+  <Tab title="Hybrid + rerank">
+    Runs both, fuses scores, then reranks top-K with an LLM. Slowest (1–3s) but best quality for "I half-remember this thing about..." queries.
+
+    ```bash
+    curl -X POST $URL/v1/docs/search/hybrid \
+        -H "Authorization: Bearer $KEY" \
+        -d '{"q":"that post about why chips take so long", "rerank":true}'
+    ```
+  </Tab>
+</Tabs>
+
+## The job queue
+
+The async capture path writes to a `capture_jobs` SQLite table (status: `queued` → `running` → `done` / `failed`). A single in-process worker drains it with `asyncio.to_thread` + a per-job timeout.
+
+You can inspect the queue at any time:
+
+```bash
+curl -H "Authorization: Bearer $KEY" $URL/jobs?limit=20
+# { "items": [...], "queue_depth": 3 }
+```
+
+Failed jobs keep the error message and the original URL — easy to retry by hand.

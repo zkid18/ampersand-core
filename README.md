@@ -6,6 +6,8 @@ When your agent researches something, it gets the open web's first page: SEO lis
 
 Capture once, query forever. Plain markdown on disk you own. Plug into any agent.
 
+📖 **Docs** — see [`docs/`](./docs/) (Mintlify site, run `mintlify dev` from inside the folder to preview locally).
+
 ## Use it anywhere
 
 <!-- TODO: replace each bullet with a 2-line gif / screenshot once the assets exist -->

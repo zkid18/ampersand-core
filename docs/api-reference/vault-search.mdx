@@ -1,0 +1,100 @@
+---
+title: Search
+description: "Three search modes — FTS5, embedding similarity, hybrid + LLM rerank."
+---
+
+Three endpoints. Same input shape; different cost/quality trade-offs.
+
+| Endpoint | Backend | Latency | Best for |
+| --- | --- | --- | --- |
+| `POST /v1/docs/search` | SQLite FTS5 | < 5ms | Exact phrases, known terms |
+| `POST /v1/docs/search/semantic` | sqlite-vec | ~50ms | Conceptually-similar docs |
+| `POST /v1/docs/search/hybrid` | FTS5 + vec + LLM rerank | 1–3s | Fuzzy recall ("that post about...") |
+
+## Request body (all three)
+
+| Field | Type | Default | What |
+| --- | --- | --- | --- |
+| `q` | string | required | Free-text query |
+| `limit` | int 1–100 | `10` | Max results |
+| `type` | string | (all) | Filter by doc type |
+| `since` | ISO timestamp | (all) | Only docs created after |
+| `rerank` | bool | `false` (hybrid only) | Enable LLM rerank on top-K |
+
+## Response (all three)
+
+```json
+{
+  "items": [
+    {
+      "id": "01JK...",
+      "title": "Why hardware development is hard",
+      "source": "https://danluu.com/...",
+      "type": "article",
+      "snippet": "...the lead time on silicon is measured in months...",
+      "score": 0.87,
+      "rerank_score": 0.92        // only present when rerank=true
+    }
+  ],
+  "took_ms": 47,
+  "mode": "hybrid"
+}
+```
+
+`score` is mode-specific (FTS5 bm25 vs vector cosine vs fused). `rerank_score` is the LLM's quality estimate, 0–1.
+
+## POST /v1/docs/search
+
+Keyword search via SQLite FTS5. Sub-millisecond.
+
+```bash
+curl -X POST http://localhost:8765/v1/docs/search \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"q":"hardware development", "limit":10}'
+```
+
+Supports FTS5 query syntax: `"exact phrase"`, `term1 OR term2`, `term -exclude`, `NEAR(a b, 5)`.
+
+## POST /v1/docs/search/semantic
+
+Embedding cosine similarity via `sqlite-vec`. Finds related docs that don't share vocabulary.
+
+```bash
+curl -X POST http://localhost:8765/v1/docs/search/semantic \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"q":"what makes building chips slow", "limit":10}'
+```
+
+Embeddings are generated at capture time via OpenAI (`text-embedding-3-small`, 1536d → stored as 512d). The server reads `OPENAI_API_KEY` from its env — without it, this endpoint returns `503: semantic search disabled`. See [Configuration](/configuration) for the full env-var reference and [Embedding setup](/quickstart#3-set-up-embeddings) for the install flow.
+
+To backfill embeddings on docs captured before `OPENAI_API_KEY` was set:
+
+```bash
+amperstand-admin vec_rebuild
+```
+
+## POST /v1/docs/search/hybrid
+
+Runs FTS5 and semantic in parallel, fuses scores via reciprocal-rank-fusion, optionally reranks top-K with an LLM.
+
+```bash
+curl -X POST http://localhost:8765/v1/docs/search/hybrid \
+    -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"q":"that post about why chips take so long", "rerank":true, "limit":10}'
+```
+
+Without `rerank`, returns in ~100ms. With rerank, 1–3s depending on LLM round-trip.
+
+<Note>
+Rerank uses the same `OPENAI_API_KEY` as the embedding step. If unset, the request returns the fused results without rerank (no error). The rerank model defaults to `gpt-4o-mini` and can be overridden with `AMPERSTAND_RERANK_MODEL` — see [Configuration](/configuration).
+</Note>
+
+## Picking a mode
+
+- **Default**: `hybrid` without rerank. Fast and usually right.
+- **You know the exact phrase**: `search` (keyword).
+- **You're describing a vibe / theme**: `semantic`.
+- **You half-remember it and need the *one* right result**: `hybrid` + `rerank: true`.

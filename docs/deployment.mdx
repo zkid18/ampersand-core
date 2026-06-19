@@ -1,0 +1,86 @@
+---
+title: Deployment
+description: "Production setup on a $4 DigitalOcean droplet."
+---
+
+This page documents the exact production layout for the reference deployment — a 1-vCPU, 512MB DigitalOcean droplet running the server, the Telegram bot, and the IMAP email watcher.
+
+## Layout
+
+```
+/opt/amperstand/                  ← venv + git checkout (read-only at runtime)
+/etc/amperstand/env               ← AMPERSTAND_API_KEY, IMAP creds, Telegram token
+/var/lib/amperstand/              ← vault data root (markdown + sqlite)
+  ├── vault/                      ← markdown files
+  └── amperstand.db               ← sqlite index
+```
+
+Owned by a dedicated `amperstand` user (no shell, no home dir).
+
+## systemd units
+
+Three units, all using the same hardening profile:
+
+| Unit | What |
+| --- | --- |
+| `amperstand-server.service` | FastAPI + uvicorn, listens on `:80` via Caddy |
+| `amperstand-tg-bot.service` | Long-polling Telegram bot, talks HTTP to the server |
+| `amperstand-email-watch.service` | IMAP fetch loop, persists via the server's API |
+
+Common hardening flags:
+
+```ini
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/amperstand
+```
+
+The `ReadWritePaths` line is the load-bearing one — without it, `ProtectSystem=strict` would block writes to the vault and you'd see `sqlite3.OperationalError: attempt to write a readonly database` with no obvious explanation.
+
+## Swap (mandatory on 512MB)
+
+trafilatura + sqlite-vec can briefly spike past 400MB during large captures. Without swap, the kernel OOM-kills uvicorn and the server restarts.
+
+```bash
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile && swapon /swapfile
+echo "/swapfile none swap sw 0 0" >> /etc/fstab
+```
+
+## Caddy reverse proxy
+
+Caddy terminates TLS (free Let's Encrypt cert) and proxies to uvicorn on `127.0.0.1:8765`. Config lives at `deploy/Caddyfile.tls` in the repo.
+
+## Backups
+
+The vault directory is rsync'd nightly to a bucket. Markdown files compress extremely well, so even thousands of captures stay under a few MB.
+
+```bash
+rsync -az /var/lib/amperstand/vault/ backup-host:/backups/amperstand/
+```
+
+The SQLite database is **not** backed up — it's an index, fully reconstructible from the markdown files alone via `amperstand-admin reindex`.
+
+## Bootstrap script
+
+For a fresh droplet, `deploy/bootstrap.sh` does the whole thing — creates the user, installs systemd units, sets up Caddy, opens firewall ports. Read it before running it: it's ~150 lines and self-documenting.
+
+## Key rotation
+
+```bash
+# On the droplet:
+NEW_KEY=$(openssl rand -hex 32)
+sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW_KEY}/" /etc/amperstand/env
+systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
+```
+
+Then update every client. The CLI: re-export `AMPERSTAND_API_KEY` in your shell. The bot: it picks up from `/etc/amperstand/env` on restart. The extension: paste new key into options page.
+
+If a key has leaked (anywhere — log file, chat, paste buffer), rotate first, audit second.

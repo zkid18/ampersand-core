@@ -1,0 +1,84 @@
+---
+title: CLI reference
+description: "Every `amperstand` command, grouped by surface."
+---
+
+The CLI ships as the `amperstand` console script from the `amperstand` package. It speaks to either a local folder or a remote HTTP server depending on `~/.amperstand/config.json`.
+
+## Capture
+
+```bash
+amperstand capture <url> [options]
+```
+
+| Option | Default | What |
+| --- | --- | --- |
+| `--output PATH` | `~/notes/inbox` (local) | Folder to write the markdown into |
+| `--stdout` | off | Print to stdout instead of writing a file |
+| `--persist / --no-persist` | persist | (server mode) Whether to save in the vault DB |
+
+## Feeds
+
+```bash
+amperstand feed add <url>           # subscribe
+amperstand feed remove <feed-id>    # unsubscribe
+amperstand feed list                # show subscriptions + last sync
+amperstand feed sync [--output PATH] # pull new items
+```
+
+In server mode, `feed list` queries `/v1/feeds` — so it reflects the actual remote state.
+
+## Email
+
+```bash
+amperstand email parse <file.eml> [--output PATH]
+```
+
+Newsletter ingestion. Production setup uses `amperstand-email-watch.service` on the droplet — runs the IMAP fetch loop continuously. The Mac CLI is interactive-only.
+
+```bash
+amperstand email setup              # one-time IMAP credential flow
+amperstand email list               # show configured mailboxes
+amperstand email allow <sender>     # allowlist a sender
+amperstand email block <sender>     # blocklist a sender
+amperstand email senders            # show what's been seen
+amperstand email sync               # one-shot pull
+amperstand email watch              # block; keep pulling forever
+```
+
+## Vault
+
+```bash
+amperstand vault init               # create local vault + sqlite index
+amperstand vault status             # health + counts
+amperstand vault sync               # rebuild index from files on disk
+amperstand vault unset              # forget current vault target
+```
+
+### Backend switching
+
+```bash
+amperstand vault backend show       # current backend (local | http)
+amperstand vault backend set-http <url> --api-key-env AMPERSTAND_API_KEY
+amperstand vault backend set-store <path>
+amperstand vault backend clear
+```
+
+<Warning>
+**Pass the env-var name, not the key value**, to `--api-key-env`. The CLI stores the name in `config.json` and reads the value at runtime — so rotating the key is just `export AMPERSTAND_API_KEY=<new>`. Passing the value directly embeds it in `config.json` and shell history.
+</Warning>
+
+## Config
+
+```bash
+amperstand config show              # dump ~/.amperstand/config.json
+amperstand config set <key> <value> # update a single field
+```
+
+## Admin (server-only)
+
+When running the HTTP server, an extra console script is available: `amperstand-admin`. It bypasses the API entirely and operates on the vault DB directly. Useful for reindexing, dropping orphaned jobs, etc.
+
+```bash
+amperstand-admin --help
+```

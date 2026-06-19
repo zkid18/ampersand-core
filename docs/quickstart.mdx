@@ -1,0 +1,157 @@
+---
+title: Quickstart
+description: "Install Amperstand, capture your first URL, find it again."
+---
+
+Amperstand ships in two modes. Pick one — you can switch later.
+
+## Local-first
+
+The CLI writes markdown directly to a folder. No server, no auth.
+
+### Install
+
+```bash
+pip install amperstand
+playwright install chromium    # one-time, for JS-heavy pages
+```
+
+<Note>
+Requires Python 3.10+. If `pip install amperstand` fails with "Could not find a version that satisfies the requirement", upgrade pip: `python -m pip install --upgrade pip`.
+</Note>
+
+### Capture an article
+
+```bash
+amperstand capture https://danluu.com/why-hardware-development-is-hard/
+```
+
+Markdown lands in `~/notes/inbox/` by default. Output the markdown to stdout instead:
+
+```bash
+amperstand capture https://example.com/article --stdout
+```
+
+Capture into a specific folder (Obsidian vault, anywhere):
+
+```bash
+amperstand capture https://example.com/article --output ~/Obsidian/Inbox
+```
+
+### Subscribe to an RSS feed
+
+```bash
+amperstand feed add https://danluu.com/atom.xml
+amperstand feed sync --output ~/notes/inbox
+```
+
+### Parse a newsletter
+
+```bash
+amperstand email parse ./newsletter.eml --output ~/notes/inbox
+```
+
+That's the entire local-first workflow. Files are yours; Amperstand is a script that fills the folder.
+
+<Tip>
+**Semantic search in local mode** also needs `OPENAI_API_KEY` — see [Set up embeddings](#set-up-embeddings) below. Without it, keyword search still works fine.
+</Tip>
+
+## Self-hosted server
+
+The HTTP server unlocks the Telegram bot, the browser extension, and a CLI that talks to a remote vault.
+
+This is the **`amperstand-core`** package — engine, extractors, vault store, search, and FastAPI server in one install.
+
+### 1. Install
+
+```bash
+pip install amperstand-core
+playwright install chromium    # for JS-heavy pages
+```
+
+That's the whole server. FastAPI, uvicorn, sqlite-vec, the extractors — all in the main package, no extras.
+
+### 2. Set required env vars
+
+```bash
+# Auth — clients send this as Bearer
+export AMPERSTAND_API_KEY="$(openssl rand -hex 32)"
+
+# Where to put markdown + the SQLite index
+export AMPERSTAND_DATA_DIR="$HOME/.amperstand-vault"
+```
+
+### 3. Set up embeddings
+
+Embeddings power semantic search, hybrid search rerank, and YouTube audio-transcript fallback. All three use the OpenAI API.
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+| Without it | What still works | What breaks |
+| --- | --- | --- |
+| Capture (articles, YouTube transcripts, feeds, email) | All of capture |  — |
+| Keyword search (`/v1/docs/search`) | Yes | — |
+| Semantic search (`/v1/docs/search/semantic`) | No | Returns `503: semantic search disabled` |
+| Hybrid search (`/v1/docs/search/hybrid`) | Degraded — FTS5 only, no rerank | Loses fused vector results |
+| YouTube audio-fallback transcripts | No | Falls back to "no transcript available" |
+
+**Embedding model**: `text-embedding-3-small`, 1536d (truncated to 512d in storage to keep `sqlite-vec` tables compact). Cost is roughly **$0.02 per 1,000 docs** at typical article length — embeddings are by far the cheapest part of the pipeline.
+
+**Backfilling**: if you captured docs before setting `OPENAI_API_KEY`, batch-embed them now:
+
+```bash
+amperstand-admin vec_rebuild
+```
+
+### 4. Run the server
+
+```bash
+uvicorn amperstand_core.server.app:app --host 0.0.0.0 --port 8765
+```
+
+For production (systemd + Caddy + swap), see [Deployment](/deployment).
+
+### 5. Point the CLI at it
+
+```bash
+# Set the key in your shell rc (so it survives new shells)
+echo 'export AMPERSTAND_API_KEY="<the-key-from-step-2>"' >> ~/.zshrc
+
+amperstand vault backend set-http http://your-server:8765 \
+    --api-key-env AMPERSTAND_API_KEY
+amperstand capture https://example.com/article    # now goes to the server
+```
+
+<Warning>
+`--api-key-env` takes the **name** of an environment variable, not the value. Passing the value directly leaks it into `~/.amperstand/config.json` and shell history. See [Authentication](/api-reference/authentication).
+</Warning>
+
+## Verify it worked
+
+Whichever path you took, this should succeed:
+
+```bash
+amperstand vault status
+```
+
+Or hit the server directly:
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     http://localhost:8765/health
+# {"status":"ok"}
+```
+
+And to confirm embeddings are working:
+
+```bash
+curl -X POST http://localhost:8765/v1/docs/search/semantic \
+     -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"q":"anything", "limit":1}'
+```
+
+If you get a result, embeddings are live. If you get `503: semantic search disabled`, `OPENAI_API_KEY` isn't set in the server process.

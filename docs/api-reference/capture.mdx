@@ -1,0 +1,103 @@
+---
+title: Capture
+description: "Turn URLs into clean markdown — sync and async."
+---
+
+Four endpoints. Two flavors (URL-only vs caller-supplied HTML) × two execution modes (sync vs async).
+
+| Endpoint | Returns | Use when |
+| --- | --- | --- |
+| `POST /capture` | 200 + markdown | You can wait 5–60s for the response |
+| `POST /capture/async` | 202 + job_id | Click-and-walk-away (bot, extension) |
+| `POST /capture/html` | 200 + markdown | The client has already rendered the page (JS) |
+| `POST /capture/html/async` | 202 + job_id | Same, but non-blocking |
+
+## POST /capture
+
+Pulls the URL server-side, runs the right extractor, returns markdown.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8765/capture \
+    -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://danluu.com/why-hardware-development-is-hard/",
+      "persist": true,
+      "frontmatter": {"tags": ["systems", "hardware"]}
+    }'
+```
+
+```python python
+import httpx, os
+r = httpx.post(
+    "http://localhost:8765/capture",
+    headers={"Authorization": f"Bearer {os.environ['AMPERSTAND_API_KEY']}"},
+    json={"url": "https://...", "persist": True},
+    timeout=120,
+)
+print(r.json())
+```
+
+</CodeGroup>
+
+### Request
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `url` | string | required | Any extractor-supported URL |
+| `persist` | bool | `true` | If `false`, returns markdown without saving |
+| `frontmatter` | object | `{}` | Merged into the doc's YAML frontmatter |
+
+### Response (200)
+
+```json
+{
+  "title": "Why hardware development is hard",
+  "url": "https://danluu.com/...",
+  "content_type": "article",
+  "markdown": "...",
+  "id": "01JK8XQ4...",
+  "path": "vault/2026/06/why-hardware-development-is-hard.md",
+  "body_hash": "a3f2d1..."
+}
+```
+
+If `persist: false`, `id` / `path` / `body_hash` are `null`.
+
+### Errors
+
+- **422** — URL unreachable, content empty, extractor crashed
+- **500** — extracted OK but couldn't write to the vault (rare; usually a permissions issue)
+
+## POST /capture/async
+
+Same request body as `/capture`. Returns immediately with a `job_id`.
+
+```json
+{ "job_id": "01JK...", "status": "queued" }
+```
+
+Poll [GET /jobs/{id}](/api-reference/jobs) for status.
+
+## POST /capture/html
+
+Identical to `/capture` but takes pre-rendered HTML. The browser extension uses this — it grabs the page DOM after JS has run, so heavy SPAs (Substack, Medium archive views) work without server-side Playwright.
+
+### Additional fields
+
+| Field | Type | What |
+| --- | --- | --- |
+| `html` | string | The page HTML (post-render) |
+| `title` | string \| null | Optional fallback if `<title>` is missing |
+
+<Note>
+For YouTube and LinkedIn URLs, the supplied HTML is **ignored** — those go through their URL-specific extractors (transcript API, embed iframe) because the canonical content lives elsewhere.
+</Note>
+
+## POST /capture/html/async
+
+Async variant of `/capture/html`. Same as `/capture/async` in shape — returns `{job_id, status}`.
+
+This is the path the Telegram bot uses for clipped URLs from the browser extension.

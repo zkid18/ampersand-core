@@ -1,0 +1,35 @@
+---
+title: API overview
+description: "Endpoints, conventions, and where to look first."
+---
+
+The Amperstand server is FastAPI under uvicorn. It speaks JSON, expects Bearer auth, and returns Pydantic-validated responses.
+
+## Base URL
+
+```
+http://<your-host>:8765       # local
+https://<your-domain>          # production behind Caddy
+```
+
+## Endpoint groups
+
+| Path prefix | Purpose | Reference |
+| --- | --- | --- |
+| `/capture`, `/capture/async`, `/capture/html`, `/capture/html/async` | One-shot URL → markdown | [Capture](/api-reference/capture) |
+| `/jobs`, `/jobs/{id}` | Async capture status | [Jobs](/api-reference/jobs) |
+| `/v1/docs` | Vault CRUD | [Vault docs](/api-reference/vault-docs) |
+| `/v1/docs/search*` | FTS5 + vec + hybrid search | [Vault search](/api-reference/vault-search) |
+| `/v1/feeds` | RSS subscription registry | [Feeds](/api-reference/feeds) |
+| `/health` | Liveness probe (unauthenticated) | — |
+
+## Conventions
+
+- **Auth**: every endpoint except `/health` requires `Authorization: Bearer <key>`. See [Authentication](/api-reference/authentication).
+- **IDs**: all docs use ULIDs — sortable, URL-safe, 26 chars.
+- **Frontmatter**: any field you put in the request body's `frontmatter` map lands in the markdown file's YAML frontmatter unchanged. Reserved keys (`id`, `body_hash`, `created_at`) are server-controlled.
+- **Errors**: 4xx are caller-fixable (bad URL, missing field, auth), 5xx mean the server tried and failed (extractor crashed, DB locked).
+
+## OpenAPI
+
+The live OpenAPI schema is at `GET /openapi.json`. Swagger UI at `GET /docs` (when not in production mode).

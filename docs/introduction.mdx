@@ -1,0 +1,86 @@
+---
+title: Introduction
+description: "Amperstand captures articles, YouTube videos, feeds, and newsletters into markdown files you own."
+---
+
+## What it is
+
+Amperstand is a **personal vault** for things you read, watch, and want to find later. It turns the web into clean markdown on your disk — articles, YouTube transcripts, RSS items, newsletter `.eml` files — and lets you search across them with hybrid keyword + vector + LLM rerank.
+
+It runs in two shapes:
+
+<CardGroup cols={2}>
+  <Card title="Local-first CLI" icon="terminal" href="/quickstart#local-first">
+    `pip install amperstand`, point it at a folder, capture into markdown. Zero server, zero auth, your files.
+  </Card>
+  <Card title="Self-hosted HTTP server" icon="server" href="/quickstart#self-hosted-server">
+    `pip install amperstand-core`, run uvicorn. Powers the Telegram bot, the browser extension, and a remote CLI client.
+  </Card>
+</CardGroup>
+
+## Two packages on PyPI
+
+| Package | What it gives you | Install |
+| --- | --- | --- |
+| **[`amperstand-core`](https://pypi.org/project/amperstand-core/)** | Engine + extractors + vault store + FastAPI server + `amperstand-admin` console script | `pip install amperstand-core` |
+| **[`amperstand`](https://pypi.org/project/amperstand/)** | The `amperstand` CLI — talks to a local vault or a remote server | `pip install amperstand` |
+
+The CLI depends on the engine, so installing `amperstand` brings `amperstand-core` along automatically. Installing the engine alone is what you do to **run the server**.
+
+## Why it exists
+
+Most read-it-later tools eventually shut down, change pricing, or own your data. Amperstand keeps the substrate as plain markdown files in a folder, with a SQLite index alongside. If you uninstall the tool tomorrow, you still have everything.
+
+## What it captures
+
+| Surface | Extractor |
+| --- | --- |
+| Articles & blog posts | trafilatura, Playwright fallback for JS-heavy pages |
+| YouTube videos | `yt-dlp` metadata + transcript API |
+| LinkedIn posts | URL-shape extractor (works on share URLs) |
+| Twitter / X | `fxtwitter` rewrite + thread reconstruction |
+| RSS / Atom feeds | `feedparser` + per-item extraction |
+| Newsletter emails | `.eml` parsing, IMAP fetch loop |
+
+## Architecture, one diagram
+
+```
+   ┌──────────────┐    HTTP    ┌──────────────────────┐
+   │  Telegram    │◄──────────►│                      │
+   │  Browser ext │            │                      │
+   │  CLI         │            │   amperstand-core    │
+   └──────────────┘            │   (FastAPI server)   │
+                               │                      │
+                               │  ┌────────────────┐  │
+                               │  │  extractors    │  │
+                               │  │  vault store   │  │
+                               │  │  feed registry │  │
+                               │  │  job queue     │  │
+                               │  │  FTS5 + vec    │  │
+                               │  └────────────────┘  │
+                               └──────────┬───────────┘
+                                          │
+                                  ┌───────▼────────┐
+                                  │  ~/notes/      │   ← markdown files
+                                  │  amperstand.db │   ← SQLite index
+                                  └────────────────┘
+```
+
+The two surfaces ship from the same Python package — `amperstand-core` on PyPI.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install, capture your first URL, find it again.
+  </Card>
+  <Card title="Concepts" icon="book" href="/concepts">
+    Vault, capture queue, feed registry, search modes.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli-reference">
+    Every `amperstand` command in one page.
+  </Card>
+  <Card title="HTTP API" icon="code" href="/api-reference/overview">
+    REST endpoints for capture, vault, search, feeds.
+  </Card>
+</CardGroup>

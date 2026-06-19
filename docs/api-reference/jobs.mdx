@@ -1,0 +1,80 @@
+---
+title: Jobs
+description: "Inspect async capture status."
+---
+
+When you POST to `/capture/async` or `/capture/html/async` you get a `job_id`. These endpoints let you look it up.
+
+## GET /jobs/{job_id}
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     http://localhost:8765/jobs/01JK...
+```
+
+### Response
+
+```json
+{
+  "id": "01JK...",
+  "url": "https://danluu.com/...",
+  "status": "done",
+  "created_at": "2026-06-19T19:01:59Z",
+  "started_at": "2026-06-19T19:02:00Z",
+  "completed_at": "2026-06-19T19:02:14Z",
+  "doc_id": "01JK8XQ4...",
+  "doc_path": "vault/2026/06/why-hardware-development-is-hard.md",
+  "error": null
+}
+```
+
+### Status values
+
+| Status | Means |
+| --- | --- |
+| `queued` | Job is in the queue, no worker has claimed it yet |
+| `running` | A worker is currently extracting |
+| `done` | Successfully captured; `doc_id` populated |
+| `failed` | Extractor or persist step failed; see `error` |
+
+### Errors
+
+- **404** — job_id doesn't exist (typo, or it was purged after retention window)
+
+## GET /jobs
+
+List recent jobs, newest first.
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "http://localhost:8765/jobs?status=failed&limit=20"
+```
+
+### Query parameters
+
+| Param | Type | Default | What |
+| --- | --- | --- | --- |
+| `status` | string | (all) | Filter by `queued` / `running` / `done` / `failed` |
+| `limit` | int 1–200 | `50` | Max rows to return |
+
+### Response
+
+```json
+{
+  "items": [
+    { "id": "01JK...", "url": "...", "status": "done", ... },
+    ...
+  ],
+  "queue_depth": 3
+}
+```
+
+`queue_depth` is the count of `queued` + `running` jobs at request time — useful for the extension's "recent clips" view.
+
+## Worker behavior
+
+- Single worker per server process; `claim_next` is atomic via a write lock + status guard
+- Per-job timeout: 120s default (configurable). Hitting it marks the job `failed` with `error: "timeout"`.
+- Retries: none. Failed jobs stay in the queue with their error message until you delete or retry them by hand.
+
+The job rows are never auto-deleted — they're a useful audit log. If the table gets large, `amperstand-admin jobs prune --older-than 30d`.

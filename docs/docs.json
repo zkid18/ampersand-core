@@ -1,0 +1,98 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Amperstand",
+  "description": "Markdown-first personal vault. Capture URLs, YouTube, RSS, and newsletters into files you own.",
+  "colors": {
+    "primary": "#0F172A",
+    "light": "#3B82F6",
+    "dark": "#0F172A"
+  },
+  "favicon": "/images/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "configuration",
+              "cli-reference",
+              "deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/overview",
+              "api-reference/authentication"
+            ]
+          },
+          {
+            "group": "Capture",
+            "pages": [
+              "api-reference/capture",
+              "api-reference/jobs"
+            ]
+          },
+          {
+            "group": "Vault",
+            "pages": [
+              "api-reference/vault-docs",
+              "api-reference/vault-search"
+            ]
+          },
+          {
+            "group": "Feeds",
+            "pages": [
+              "api-reference/feeds"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/zkid18/ampersand-core",
+          "icon": "github"
+        },
+        {
+          "anchor": "PyPI",
+          "href": "https://pypi.org/project/amperstand/",
+          "icon": "python"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/images/logo.svg",
+    "dark": "/images/logo-dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/zkid18/ampersand-core"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/zkid18"
+    }
+  }
+}

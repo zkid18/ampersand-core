@@ -1,0 +1,76 @@
+---
+title: Authentication
+description: "Bearer tokens, how to rotate them, what not to do."
+---
+
+Every endpoint (except `/health`) requires:
+
+```
+Authorization: Bearer <AMPERSTAND_API_KEY>
+```
+
+The key is generated at server install and stored at `/etc/amperstand/env` on the server, mode `0640`, owned by `root:amperstand`.
+
+## Generating a key
+
+```bash
+openssl rand -hex 32
+```
+
+64 hex chars. Enough entropy that brute force is uninteresting.
+
+## Storing it on the client
+
+<Tabs>
+  <Tab title="CLI (recommended)">
+    ```bash
+    # Save the key to a 0600 file
+    echo "<the-key>" > ~/.amperstand-api-key
+    chmod 600 ~/.amperstand-api-key
+
+    # Export it in your shell rc
+    echo 'export AMPERSTAND_API_KEY="$(cat ~/.amperstand-api-key | tr -d "\n")"' >> ~/.zshrc
+
+    # Point the CLI at the env var NAME
+    amperstand vault backend set-http http://your-server \
+        --api-key-env AMPERSTAND_API_KEY
+    ```
+
+    The CLI stores the **env var name** in `~/.amperstand/config.json`, not the value. Rotating is just re-export.
+  </Tab>
+  <Tab title="Bot / extension">
+    Set `AMPERSTAND_API_KEY` in the process environment. For the production bot, it lives in `/etc/amperstand/env` (the same file the server reads).
+  </Tab>
+  <Tab title="curl / scripts">
+    ```bash
+    curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+         https://your-server/health
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+**Never pass the key value directly as `--api-key-env`.** That flag takes the *name* of an env var. Passing the value (e.g. `--api-key-env 9b0d3b09...`) lands the key in `config.json`, shell history, and command logs.
+</Warning>
+
+## Rotating a key
+
+```bash
+ssh root@your-server
+NEW=$(openssl rand -hex 32)
+sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW}/" /etc/amperstand/env
+systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
+echo "$NEW"
+```
+
+Then update every client. All existing connections are dropped on restart.
+
+## If a key leaks
+
+Don't audit first. Rotate first.
+
+1. Rotate on the server (above)
+2. Update every client
+3. Then check logs to see whether anything happened in the window
+
+The cost of rotation is small (one minute, no data loss). The cost of leaving a leaked key live is potentially much larger.
