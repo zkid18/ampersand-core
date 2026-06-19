@@ -13,6 +13,7 @@ import typer
 
 from amperstand_core.server.admin_cli.commands import backup as backup_cmd
 from amperstand_core.server.admin_cli.commands import classifier as classifier_cmd
+from amperstand_core.server.admin_cli.commands import feeds_sync as feeds_sync_cmd
 from amperstand_core.server.admin_cli.commands import integrity as integrity_cmd
 from amperstand_core.server.admin_cli.commands import rotate_key as rotate_key_cmd
 from amperstand_core.server.admin_cli.commands import stats as stats_cmd
@@ -136,6 +137,18 @@ def classifier_diff(env_file: EnvFileOpt = None) -> None:
 def classifier_domains(env_file: EnvFileOpt = None) -> None:
     """Show effective newsletter + promo domain lists (bundled + user override)."""
     classifier_cmd.run_domains(_resolve(env_file))
+
+
+@app.command(name="feeds-sync")
+def feeds_sync(
+    env_file: EnvFileOpt = None,
+    base_url: Annotated[
+        str,
+        typer.Option("--base-url", help="Local server URL."),
+    ] = "http://127.0.0.1:8765",
+) -> None:
+    """Trigger POST /feeds/sync against the local server (used by amperstand-feed-sync.service)."""
+    feeds_sync_cmd.run(_resolve(env_file), base_url=base_url)
 
 
 if __name__ == "__main__":

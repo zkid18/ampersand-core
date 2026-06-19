@@ -28,7 +28,11 @@ What that does:
 
 64 hex chars × 4 bits = **256 bits of entropy**. Brute-forcing a 256-bit secret is more expensive than the energy budget of the observable universe — you don't need to invent your own key; this command is correct.
 
-The `bootstrap.sh` script runs this once on first install and writes the result to `/etc/amperstand/env`. It prints the key once to stdout so you can copy it. After that, you can retrieve it from the server filesystem (`grep AMPERSTAND_API_KEY /etc/amperstand/env`).
+The `bootstrap.sh` script runs this once on first install and writes the result to `/etc/amperstand/env`. It prints the key once to stdout so you can copy it. After that, you can retrieve it from the server filesystem (`grep '^AMPERSTAND_API_KEY=' /etc/amperstand/env | cut -d= -f2-`).
+
+<Note>
+`cut -d= -f2-` strips the `AMPERSTAND_API_KEY=` prefix. Without it, `grep` returns the entire line; pasting that into a client config (`Bearer AMPERSTAND_API_KEY=<hex>`) returns 401 for every request.
+</Note>
 
 ## Threat model — what the key grants
 
@@ -91,13 +95,22 @@ Per-key scopes and per-client identity are on the roadmap; not built yet.
 
 ```bash
 ssh root@your-server
-NEW=$(openssl rand -hex 32)
-sudo sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW}/" /etc/amperstand/env
-sudo systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
-echo "$NEW"
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin rotate-key \
+    --env-file /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service
+# plus any Telegram bot / extension-host units; their unit names vary by deployment
+
+# Verify the server came back up:
+sudo systemctl is-active amperstand-server
 ```
 
-The restart drops every existing connection — all clients holding the old key get `401 Unauthorized` until they swap to the new one. There's no grace period.
+The `amperstand-admin rotate-key` command does a surgical line-replace on the env file (other keys, comments, ownership all preserved), prints the new key once, and never puts it on a command line — so it doesn't leak into shell history, sudo audit logs, or `/proc/<pid>/cmdline`. Compare the older `sed -i` recipe, which did.
+
+<Warning>
+**The restart drains in-flight requests for up to ~25 seconds before the old worker exits.** Clients holding the old key keep getting 200s during that drain. For a hot leak, follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up to cut the drain window to zero.
+</Warning>
+
+After rotation, also scrub the old key from anywhere it might persist: your shell history (`history -d <linenumber>` or `~/.zsh_history` / `~/.bash_history` edit), editor swap files (`/etc/amperstand/env.swp` if you ever used `nano`), and the encrypted backup files retained per [Deployment](/deployment#backups) — the old (leaked) key lives in those for the backup retention window unless you regenerate them.
 
 After rotating, update every client:
 - CLI: re-export `AMPERSTAND_API_KEY` in each shell (or restart your terminal if it's in your rc)

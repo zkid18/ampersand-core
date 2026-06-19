@@ -182,12 +182,18 @@ For a fresh droplet, `deploy/bootstrap.sh` does the whole thing — creates the 
 ## Key rotation
 
 ```bash
-# On the droplet:
-NEW_KEY=$(openssl rand -hex 32)
-sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW_KEY}/" /etc/amperstand/env
-systemctl restart amperstand-server amperstand-tg-bot amperstand-email-watch
+# On the droplet — surgical, ownership-preserving:
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin rotate-key \
+    --env-file /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service
+# Plus restart any client units that read /etc/amperstand/env (e.g. Telegram bot).
+
+# Verify:
+sudo systemctl is-active amperstand-server
 ```
 
-Then update every client. The CLI: re-export `AMPERSTAND_API_KEY` in your shell. The bot: it picks up from `/etc/amperstand/env` on restart. The extension: paste new key into options page.
+Then update every external client. The CLI: re-export `AMPERSTAND_API_KEY` in your shell. The extension: paste new key into options page. The bot: picks up from `/etc/amperstand/env` on restart.
 
-If a key has leaked (anywhere — log file, chat, paste buffer), rotate first, audit second.
+If a key has leaked (anywhere — log file, chat, paste buffer), rotate first, audit second. The `rotate-key` admin command does a targeted edit on just the `AMPERSTAND_API_KEY=` line: comments, other secrets, and the `0640 root:amperstand` perms are preserved. Avoid the older `sed -i` recipe — it leaked the new key into shell history, the sudo audit log, and `/proc/<pid>/cmdline`.
+
+Note: the server drains in-flight requests for up to ~25 seconds on restart. For a hot leak, follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up.

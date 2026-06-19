@@ -10,12 +10,13 @@ User=amperstand
 Group=amperstand
 WorkingDirectory=/var/lib/amperstand
 EnvironmentFile=/etc/amperstand/env
-# Server-side registry replaces the client-side state.json path the CLI used
-# to read (Self-hoster S2/S4). curl into the local server's /feeds/sync,
-# which iterates the persistent registry and runs the same extract+capture
-# loop as POST /feeds/ingest. Output goes to journal so failures show up
-# in `journalctl -u amperstand-feed-sync`.
-ExecStart=/bin/sh -c 'curl -fsS -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" -H "Content-Type: application/json" -d "{}" http://127.0.0.1:8765/feeds/sync'
+# `amperstand-admin feeds-sync` reads AMPERSTAND_API_KEY from the process env
+# (loaded by EnvironmentFile= above) and POSTs to /feeds/sync in-process.
+# Earlier versions of this unit used `sh -c 'curl ... -H "Authorization:
+# Bearer $AMPERSTAND_API_KEY" ...'` which expanded the secret into curl's
+# argv — visible to any local user via /proc/<pid>/cmdline. The new
+# console-script never puts the key on a command line.
+ExecStart=/opt/amperstand/venv/bin/amperstand-admin feeds-sync
 StandardOutput=journal
 StandardError=journal
 

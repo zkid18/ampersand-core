@@ -127,22 +127,33 @@ The bootstrap wrote it to a file on the server. You can read it back:
 
 ```bash
 ssh root@<your-droplet-ip>
-grep AMPERSTAND_API_KEY /etc/amperstand/env
+grep '^AMPERSTAND_API_KEY=' /etc/amperstand/env | cut -d= -f2-
 ```
+
+(`cut -d= -f2-` strips the `AMPERSTAND_API_KEY=` prefix so what prints is only the key value — paste-ready for your client config.)
 
 **What if it leaks?** (You pasted it in a screenshot, committed it to a public repo, etc.)
 
-Rotate immediately — generate a new one, swap it in, restart:
+Rotate immediately using the admin CLI — it generates a new key, swaps it in atomically, preserves file ownership/perms, and prints the new key once:
 
 ```bash
 ssh root@<your-droplet-ip>
-NEW=$(openssl rand -hex 32)
-sudo sed -i "s/^AMPERSTAND_API_KEY=.*/AMPERSTAND_API_KEY=${NEW}/" /etc/amperstand/env
-sudo systemctl restart amperstand-server
-echo "$NEW"
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin rotate-key \
+    --env-file /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service
+# Plus restart any Telegram bot / extension-host units you run.
+
+# Verify the server came back up:
+sudo systemctl is-active amperstand-server
 ```
 
-Then re-paste the new key into every client (CLI on your laptop, Telegram bot config, browser extension). The old key stops working the moment the server restarts.
+The `amperstand-admin rotate-key` command does a surgical line-replace on the env file — comments, quoted values, and the file's `0640 root:amperstand` ownership are preserved. The new key is printed once to stdout; paste it into the CLI on your laptop, Telegram bot config, browser extension.
+
+<Warning>
+**Restarting the server does NOT instantly invalidate the old key.** uvicorn drains in-flight requests for up to ~25 seconds on SIGTERM, so requests holding the old key keep working until the old worker exits. For a hot leak (you saw the key in someone else's terminal), follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up — this cuts the drain window to zero.
+
+Avoid the older `sed -i ... AMPERSTAND_API_KEY=...` recipe: it leaks the new key into `~/.bash_history`, the sudo audit log, and `/proc/<pid>/cmdline`. The admin CLI never puts the key on a command line.
+</Warning>
 
 ## Step 6: Add the OpenAI key (recommended)
 
