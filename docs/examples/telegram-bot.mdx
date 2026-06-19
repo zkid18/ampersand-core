@@ -92,7 +92,7 @@ Required env vars:
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `AMPERSTAND_BASE_URL` | Your server, e.g. `http://your-droplet:8765` |
-| `AMPERSTAND_API_KEY` | Your server's bearer token |
+| `AMPERSTAND_API_KEY` | Your server's API key |
 | `BOT_ALLOWED_USER_IDS` | Comma-sep Telegram numeric IDs (optional but recommended) |
 
 Discover your Telegram ID by leaving `BOT_ALLOWED_USER_IDS=` empty, message the bot `/whoami`, paste the returned number back, restart.
@@ -117,6 +117,6 @@ It reads from the same `/etc/amperstand/env` as the server, so the API key only 
 ## What to copy if you're building a similar client
 
 - **One `VaultClient` per process**, not per request — keeps the connection pool warm.
-- **Bearer auth via constructor**, not per-call — DRY and prevents key leaks.
+- **API key set in the constructor**, not per-call — DRY and keeps the key out of every method signature.
 - **Use the async endpoints (`/capture/async`)** for any chat surface where users expect immediate feedback. Then push a "saved!" reply once the job finishes.
 - **The allowlist is your firewall** — the API key is shared across all clients, so per-user gating must happen at the client layer.

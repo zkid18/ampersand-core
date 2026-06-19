@@ -113,7 +113,7 @@ Your API key: 9b0d3b09df0be9eda282e11eb1ea8cece179be06d5916d67aae0cd376c78f8f9
 
 ### About this key
 
-The "API key" the bootstrap printed is your server's **bearer token**. Every client (CLI, Telegram bot, browser extension, your own agent code) sends it in an `Authorization: Bearer <key>` header to prove "yes, I'm allowed to talk to your vault."
+The API key the bootstrap printed is the master credential for your server. Every client (CLI, Telegram bot, browser extension, your own agent code) sends it in an HTTP header — `Authorization: Bearer <your-API-key>` — to prove "yes, I'm allowed to talk to your vault." (*"Bearer"* is just the HTTP-spec name for the header scheme; it means "whoever holds this token has access." You don't need to memorize the word.)
 
 **How it was generated**: bootstrap ran `openssl rand -hex 32` inside your droplet — 32 random bytes from the kernel's CSPRNG, encoded as 64 hex characters. That's 256 bits of entropy. Brute-forcing it would take longer than the age of the universe with every computer on Earth, so you don't need to invent your own; this one is fine.
 

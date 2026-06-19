@@ -1,15 +1,19 @@
 ---
 title: Authentication
-description: "Bearer tokens, how they're generated, how to rotate them, what they grant."
+description: "How the API key works — generation, rotation, threat model."
 ---
 
-Every endpoint (except `/health`) requires:
+Every endpoint (except `/health`) requires an API key, sent in an HTTP header:
 
 ```
 Authorization: Bearer <AMPERSTAND_API_KEY>
 ```
 
-There is one key for the whole server. It's stored at `/etc/amperstand/env`, mode `0640`, owned by `root:amperstand`. No per-user, per-client, or per-scope keys today.
+There is one API key for the whole server. It's stored at `/etc/amperstand/env`, mode `0640`, owned by `root:amperstand`. No per-user, per-client, or per-scope keys today.
+
+<Info>
+**Why does the header say "Bearer"?** It's the HTTP spec name for this kind of auth scheme — `Bearer` means "whoever bears (holds) this token has access." You'll see `Authorization: Bearer <key>` in tons of APIs (GitHub, Stripe, OpenAI, Slack). The word `Bearer` is a literal that goes in the header verbatim; everywhere else in these docs we just call it "the API key."
+</Info>
 
 ## How the key is generated
 
@@ -28,7 +32,7 @@ The `bootstrap.sh` script runs this once on first install and writes the result 
 
 ## Threat model — what the key grants
 
-The bearer token is a **master key**. Anyone holding it can:
+The API key is a **master credential**. Anyone holding it can:
 
 - Read every doc in the vault (`GET /v1/docs`, `GET /v1/docs/{id}`)
 - Capture new docs from any URL (`POST /capture`)
@@ -36,7 +40,7 @@ The bearer token is a **master key**. Anyone holding it can:
 - Delete docs (`DELETE /v1/docs/{id}` — hard delete, no trash)
 - Run arbitrary search and chat queries against your corpus (`POST /v1/docs/search/*`, `POST /v1/chat`)
 
-There's **no scope, no read-only mode, no per-client identity**. If you give the bearer to the Telegram bot, the bot can also delete things.
+There's **no scope, no read-only mode, no per-client identity**. If you give the API key to the Telegram bot, the bot can also delete things.
 
 This is fine for a single-operator personal box. It is NOT fine for:
 - Multi-user deployments
@@ -118,7 +122,7 @@ The single-key design is intentional for a single-operator personal box: simpler
 If you need per-client distinction today:
 
 - Run **separate amperstand-core servers** for separate trust domains (one for your personal vault, one for a shared family vault, etc.)
-- Or front the server with a **reverse-proxy auth layer** (Caddy + `forward_auth`, oauth2-proxy, Authelia) that gates the bearer token behind a higher-level identity check
-- Or accept the limitation and don't expose the bearer to anything you don't fully trust
+- Or front the server with a **reverse-proxy auth layer** (Caddy + `forward_auth`, oauth2-proxy, Authelia) that gates the API key behind a higher-level identity check
+- Or accept the limitation and don't expose the API key to anything you don't fully trust
 
 Native per-key scopes (`read-only`, `capture-only`, etc.) are on the roadmap. Not built.

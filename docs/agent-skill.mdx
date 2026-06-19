@@ -400,7 +400,7 @@ Default to `hybrid + rerank` for the first pass on any new question. Switch to `
 
 ## Hard rules
 
-- **NEVER** log, print, or echo `AMPERSTAND_API_KEY` or any vault Bearer token. It transits in `Authorization` headers only.
+- **NEVER** log, print, or echo `AMPERSTAND_API_KEY` or any vault API key. It transits in the `Authorization` header only.
 - **NEVER** call `WebSearch` or `WebFetch`. Vault-only.
 - **Don't** invent doc IDs. If a vault search returns nothing, mark uncertain.
 - **Don't** skip the iterate-query-angles step. Often the first phrasing misses; the third nails it.
