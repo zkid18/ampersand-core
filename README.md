@@ -257,17 +257,20 @@ openssl rand -hex 32
 
 That's it — it's just a 64-char hex string used as a shared secret. **The bootstrap script does this for you** if you run it (see step 3). To rotate later: `amperstand-admin rotate-key --env-file /etc/amperstand/env`.
 
-### 2. Local-only client (talk to a vault server somewhere else)
+### 2. Just the CLI client (talk to a vault server somewhere else)
+
+The CLI is a separate package — install it directly from PyPI. No need to clone this repo.
 
 ```bash
-git clone https://github.com/zkid18/amperstand-core
-cd amperstand-core
-uv venv && uv pip install -e .
+pip install amperstand
 
-export AMPERSTAND_BASE_URL=https://your-vault-server      # or http://192.168.x.y:8765 for LAN
 export AMPERSTAND_API_KEY=<the 64-char hex from step 1>
+amperstand vault backend set-http https://your-vault-server \
+    --api-key-env AMPERSTAND_API_KEY
 amperstand capture <some-url>
 ```
+
+The CLI is HTTP-only — it speaks REST to the server, runs no extraction itself. See the [CLI repo](https://github.com/zkid18/amperstand-cli) for details.
 
 ### 3. Full self-hosted server (vault + FTS + vector + chat)
 

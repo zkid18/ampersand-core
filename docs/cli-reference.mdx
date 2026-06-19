@@ -3,82 +3,92 @@ title: CLI reference
 description: "Every `amperstand` command, grouped by surface."
 ---
 
-The CLI ships as the `amperstand` console script from the `amperstand` package. It speaks to either a local folder or a remote HTTP server depending on `~/.amperstand/config.json`.
+The `amperstand` CLI is an HTTP client for an `amperstand-core` server. Install with `pip install amperstand`. It does no extraction itself — every command translates to a REST call against the server you've configured.
+
+## Backend setup
+
+Before any other command works, point the CLI at a server:
+
+```bash
+amperstand vault backend set-http http://your-server:8765 \
+    --api-key-env AMPERSTAND_API_KEY
+
+amperstand vault backend show           # see current config
+amperstand vault backend clear          # forget the server
+```
+
+<Warning>
+`--api-key-env` takes the **name** of an environment variable, not the value. The CLI stores the *name* in `~/.amperstand/config.json` and reads the value at runtime — so rotating the key is just `export AMPERSTAND_API_KEY=<new>`. Passing the value directly embeds it in the config file.
+</Warning>
 
 ## Capture
 
 ```bash
-amperstand capture <url> [options]
+amperstand capture <url>
 ```
 
-| Option | Default | What |
-| --- | --- | --- |
-| `--output PATH` | `~/notes/inbox` (local) | Folder to write the markdown into |
-| `--stdout` | off | Print to stdout instead of writing a file |
-| `--persist / --no-persist` | persist | (server mode) Whether to save in the vault DB |
+POSTs the URL to `/capture`. Returns the saved doc's ID and path. Use `--stdout` to also print the markdown the server extracted.
+
+| Option | What |
+| --- | --- |
+| `--stdout` | Print the extracted markdown after saving |
+| `--no-persist` | Extract only — don't save in the vault |
+| `--type <kind>` | Override the auto-detected type (article, youtube, etc.) |
 
 ## Feeds
 
 ```bash
-amperstand feed add <url>           # subscribe
-amperstand feed remove <feed-id>    # unsubscribe
-amperstand feed list                # show subscriptions + last sync
-amperstand feed sync [--output PATH] # pull new items
+amperstand feed add <url>           # subscribe (POST /v1/feeds/register)
+amperstand feed remove <feed-id>    # unsubscribe (DELETE /v1/feeds/{id})
+amperstand feed list                # show subscriptions + last sync (GET /v1/feeds)
+amperstand feed sync                # trigger a server-side sync (POST /v1/feeds/sync)
 ```
 
-In server mode, `feed list` queries `/v1/feeds` — so it reflects the actual remote state.
+The actual feed polling runs on a cron on the server. `feed sync` just kicks it manually.
 
 ## Email
 
 ```bash
-amperstand email parse <file.eml> [--output PATH]
+amperstand email parse <file.eml>
 ```
 
-Newsletter ingestion. Production setup uses `amperstand-email-watch.service` on the droplet — runs the IMAP fetch loop continuously. The Mac CLI is interactive-only.
+Reads the local `.eml` file's bytes and POSTs them to the server's email-parse endpoint. The server runs the newsletter extractor and persists the result.
 
 ```bash
-amperstand email setup              # one-time IMAP credential flow
-amperstand email list               # show configured mailboxes
-amperstand email allow <sender>     # allowlist a sender
-amperstand email block <sender>     # blocklist a sender
-amperstand email senders            # show what's been seen
-amperstand email sync               # one-shot pull
-amperstand email watch              # block; keep pulling forever
+amperstand email senders        # show senders the server has seen
+amperstand email allow <addr>   # add to server's allowlist
+amperstand email block <addr>   # block
 ```
+
+These all hit server-side state. Allowlists live on the server, not in `~/.amperstand`.
+
+For the IMAP fetch loop (continuous newsletter capture), see [Deployment](/deployment) — it runs as a systemd unit on the server, not via the CLI.
 
 ## Vault
 
 ```bash
-amperstand vault init               # create local vault + sqlite index
-amperstand vault status             # health + counts
-amperstand vault sync               # rebuild index from files on disk
-amperstand vault unset              # forget current vault target
+amperstand vault status         # GET /v1/health + counts
 ```
 
-### Backend switching
-
-```bash
-amperstand vault backend show       # current backend (local | http)
-amperstand vault backend set-http <url> --api-key-env AMPERSTAND_API_KEY
-amperstand vault backend set-store <path>
-amperstand vault backend clear
-```
-
-<Warning>
-**Pass the env-var name, not the key value**, to `--api-key-env`. The CLI stores the name in `config.json` and reads the value at runtime — so rotating the key is just `export AMPERSTAND_API_KEY=<new>`. Passing the value directly embeds it in `config.json` and shell history.
-</Warning>
+That's it for vault-level commands today. Per-doc operations (get / update / delete) go through the API directly — see [Vault documents](/api-reference/vault-docs).
 
 ## Config
 
 ```bash
-amperstand config show              # dump ~/.amperstand/config.json
-amperstand config set <key> <value> # update a single field
+amperstand config show          # dump ~/.amperstand/config.json
+amperstand config set <key> <value>
 ```
 
-## Admin (server-only)
+The CLI's config is small: the server URL, the API key env-var name, and a few defaults.
 
-When running the HTTP server, an extra console script is available: `amperstand-admin`. It bypasses the API entirely and operates on the vault DB directly. Useful for reindexing, dropping orphaned jobs, etc.
+## Server-side admin
+
+`amperstand-admin` is a separate CLI that ships with `amperstand-core` and runs **on the server**, not on your laptop. It operates on the vault DB directly, bypassing the API. Useful for batch operations: reindexing, backfilling embeddings, pruning old jobs.
 
 ```bash
 amperstand-admin --help
+amperstand-admin vec_rebuild        # backfill embeddings for un-embedded docs
+amperstand-admin config show        # what the server sees
 ```
+
+You'd typically SSH to your server to run these — never from your laptop.

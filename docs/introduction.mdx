@@ -1,81 +1,90 @@
 ---
 title: Introduction
-description: "Amperstand captures articles, YouTube videos, feeds, and newsletters into markdown files you own."
+description: "Self-hosted personal vault. Capture URLs, YouTube, RSS, and newsletters from any client into one searchable store."
 ---
 
 ## What it is
 
-Amperstand is a **personal vault** for things you read, watch, and want to find later. It turns the web into clean markdown on your disk — articles, YouTube transcripts, RSS items, newsletter `.eml` files — and lets you search across them with hybrid keyword + vector + LLM rerank.
+Amperstand is a **self-hosted personal vault** — a small server you run that:
 
-It runs in two shapes:
+- Captures web content (articles, YouTube, RSS, newsletter emails) into clean markdown files you own
+- Stores them in a folder on disk with a SQLite index for FTS5 + vector + hybrid search
+- Exposes a REST API any client can talk to
 
-<CardGroup cols={2}>
-  <Card title="Local-first CLI" icon="terminal" href="/quickstart#local-first">
-    `pip install amperstand`, point it at a folder, capture into markdown. Zero server, zero auth, your files.
-  </Card>
-  <Card title="Self-hosted HTTP server" icon="server" href="/quickstart#self-hosted-server">
-    `pip install amperstand-core`, run uvicorn. Powers the Telegram bot, the browser extension, and a remote CLI client.
-  </Card>
-</CardGroup>
+You run it once on a $4 droplet (or your home server), then connect any number of clients: a CLI on your laptop, a Telegram bot, a Chrome extension, your own agent code. They all share one vault.
 
-## Two packages on PyPI
+## Architecture
 
-| Package | What it gives you | Install |
+```
+   ┌──────────────────┐
+   │  amperstand      │  ← CLI on your laptop
+   │  (HTTP client)   │
+   └─────────┬────────┘
+             │
+   ┌─────────┴────────┐    ┌──────────────┐
+   │  Telegram bot    │    │  Chrome ext  │
+   └─────────┬────────┘    └──────┬───────┘
+             │                    │
+             └──────────┬─────────┘
+                        │ HTTP + Bearer auth
+                ┌───────▼──────────┐
+                │                  │
+                │  amperstand-core │  ← the server you run
+                │   (FastAPI)      │
+                │                  │
+                │ ┌──────────────┐ │
+                │ │ extractors   │ │
+                │ │ vault store  │ │
+                │ │ feed registry│ │
+                │ │ job queue    │ │
+                │ │ FTS5 + vec   │ │
+                │ └──────────────┘ │
+                └────────┬─────────┘
+                         │
+                  ┌──────▼────────┐
+                  │  ~/vault/     │   ← markdown files
+                  │  vault.db     │   ← SQLite index
+                  └───────────────┘
+```
+
+Every client speaks HTTP. The server is the only thing that touches your vault files.
+
+## Two PyPI packages, one product
+
+| Package | What it is | Where it runs |
 | --- | --- | --- |
-| **[`amperstand-core`](https://pypi.org/project/amperstand-core/)** | Engine + extractors + vault store + FastAPI server + `amperstand-admin` console script | `pip install amperstand-core` |
-| **[`amperstand`](https://pypi.org/project/amperstand/)** | The `amperstand` CLI — talks to a local vault or a remote server | `pip install amperstand` |
+| **[`amperstand-core`](https://pypi.org/project/amperstand-core/)** | The server. Engine + extractors + vault store + REST API + `amperstand-admin` console script | One install on your server / droplet |
+| **[`amperstand`](https://pypi.org/project/amperstand/)** | The CLI client. HTTP-only — talks to your server | One install per laptop |
 
-The CLI depends on the engine, so installing `amperstand` brings `amperstand-core` along automatically. Installing the engine alone is what you do to **run the server**.
-
-## Why it exists
-
-Most read-it-later tools eventually shut down, change pricing, or own your data. Amperstand keeps the substrate as plain markdown files in a folder, with a SQLite index alongside. If you uninstall the tool tomorrow, you still have everything.
+The two packages don't import each other. They communicate over the network like `postgres` and `psql`.
 
 ## What it captures
 
 | Surface | Extractor |
 | --- | --- |
 | Articles & blog posts | trafilatura, Playwright fallback for JS-heavy pages |
-| YouTube videos | `yt-dlp` metadata + transcript API |
-| LinkedIn posts | URL-shape extractor (works on share URLs) |
+| YouTube videos | `yt-dlp` metadata + transcript API + optional Whisper fallback |
+| LinkedIn posts | URL-shape extractor |
 | Twitter / X | `fxtwitter` rewrite + thread reconstruction |
 | RSS / Atom feeds | `feedparser` + per-item extraction |
 | Newsletter emails | `.eml` parsing, IMAP fetch loop |
 
-## Architecture, one diagram
+All extraction runs **on the server**. Clients just hand over a URL (or HTML, or an .eml file) and wait for the result.
 
-```
-   ┌──────────────┐    HTTP    ┌──────────────────────┐
-   │  Telegram    │◄──────────►│                      │
-   │  Browser ext │            │                      │
-   │  CLI         │            │   amperstand-core    │
-   └──────────────┘            │   (FastAPI server)   │
-                               │                      │
-                               │  ┌────────────────┐  │
-                               │  │  extractors    │  │
-                               │  │  vault store   │  │
-                               │  │  feed registry │  │
-                               │  │  job queue     │  │
-                               │  │  FTS5 + vec    │  │
-                               │  └────────────────┘  │
-                               └──────────┬───────────┘
-                                          │
-                                  ┌───────▼────────┐
-                                  │  ~/notes/      │   ← markdown files
-                                  │  amperstand.db │   ← SQLite index
-                                  └────────────────┘
-```
+## Why this shape
 
-The two surfaces ship from the same Python package — `amperstand-core` on PyPI.
+- **One vault, many clients.** Capture from your phone via Telegram, one-click from the browser, batch from a script — everything lands in the same searchable store.
+- **Data sovereignty.** The vault is plain markdown files on a server you own. The tool can disappear; the files don't.
+- **Stable surface.** The HTTP API is the contract. Build any client in any language. Your own agents query the same endpoints the bot does.
 
 ## Where to go next
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install, capture your first URL, find it again.
+    Set up the server, connect the CLI, capture your first URL.
   </Card>
   <Card title="Concepts" icon="book" href="/concepts">
-    Vault, capture queue, feed registry, search modes.
+    Vault, capture surfaces, feed registry, search modes, job queue.
   </Card>
   <Card title="CLI reference" icon="terminal" href="/cli-reference">
     Every `amperstand` command in one page.

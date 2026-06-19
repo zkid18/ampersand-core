@@ -5,7 +5,7 @@ description: "The five things you need to know to think about Amperstand."
 
 ## The vault
 
-The vault is **a folder of markdown files plus a sidecar SQLite database**. Files are the source of truth; SQLite is an index you can drop and rebuild from the files alone.
+The vault is **a folder of markdown files plus a sidecar SQLite database**, both living on your server. Files are the source of truth; SQLite is an index you can drop and rebuild from the files alone.
 
 Every captured doc looks like this on disk:
 
@@ -26,27 +26,30 @@ body_hash: a3f2d1...    # content hash; used to detect edits
 
 The frontmatter is the canonical metadata. SQLite holds the same fields plus full-text and vector indexes for search.
 
+The vault lives at `$AMPERSTAND_DATA_DIR` on the server (default: `/var/lib/amperstand/vault` in production). Clients never touch these files directly — they go through the HTTP API.
+
 ## Capture surfaces
 
-A "capture surface" is a way Amperstand picks up content. They share the same extraction pipeline but differ in how the URL/content arrives:
+A "capture surface" is a way a URL or piece of content gets into the vault. All surfaces talk HTTP to the same server, which does the actual extraction:
 
-| Surface | Trigger | Latency |
+| Surface | Trigger | Path |
 | --- | --- | --- |
-| **CLI sync** | `amperstand capture <url>` | Blocking, 5–60s depending on source |
-| **HTTP `/capture`** | POST from client | Blocking, same as above |
-| **HTTP `/capture/async`** | POST returns 202 + job_id | Non-blocking; worker processes in background |
-| **Telegram bot** | Send URL to the bot chat | Async via `/capture/async` under the hood |
-| **Browser extension** | One-click on any page | Async; sends rendered HTML so JS-heavy pages work |
-| **Feed sync** | Cron / `amperstand feed sync` | Per-item; runs serial |
-| **Email watch** | systemd loop polling IMAP | Async per message |
+| **CLI** | `amperstand capture <url>` | POST `/capture` |
+| **Telegram bot** | DM a URL to the bot | POST `/capture/async` |
+| **Browser extension** | Click the extension icon on any page | POST `/capture/html/async` (sends rendered HTML) |
+| **Feed sync** | Cron on the server | Server-internal (no HTTP needed) |
+| **Email watch** | systemd loop polling IMAP on the server | Server-internal |
+| **Your code** | POST to `/capture` from anywhere | POST `/capture` |
 
-The async path exists because YouTube/long articles can take 30–120 seconds, and you don't want a Telegram bot popup hanging that long.
+Notice the symmetry: every external surface uses the same REST API. The CLI and the bot and your own agent code all look identical from the server's perspective.
+
+The async endpoints (`/capture/async`, `/capture/html/async`) return immediately with a `job_id` and run the extraction in a background worker. That exists because YouTube and long articles can take 30–120 seconds, and the Telegram bot's popup can't hang that long.
 
 ## Feed registry
 
-Subscribed RSS/Atom feeds live in a server-side **feed registry** — a SQLite table with `feed_id`, `url`, `last_sync`, `etag`, `last_status`. The CLI's `feed add` writes to this registry; the sync job reads from it.
+Subscribed RSS/Atom feeds live in a server-side **feed registry** — a SQLite table with `feed_id`, `url`, `last_sync`, `etag`, `last_status`. The CLI's `feed add` writes to this registry via `POST /v1/feeds/register`; the server's sync job reads from it on its own schedule.
 
-Why server-side? So multiple clients (CLI on laptop + Telegram bot + extension) see the same subscription list. Local mode keeps the registry in `~/.amperstand/state.json` instead.
+Server-side state means all clients see the same subscription list. `amperstand feed list` on your laptop and `/feeds` in the Telegram bot show the same feeds.
 
 ## Search modes
 
@@ -63,7 +66,7 @@ Three modes, increasing in cost and quality:
     ```
   </Tab>
   <Tab title="Semantic (sqlite-vec)">
-    Embedding similarity using `sqlite-vec`. Finds conceptually-related docs that don't share words. ~50ms per query.
+    Embedding similarity using `sqlite-vec`. Finds conceptually-related docs that don't share words. ~50ms per query. Needs `OPENAI_API_KEY` set on the server.
 
     ```bash
     curl -X POST $URL/v1/docs/search/semantic \
@@ -84,9 +87,9 @@ Three modes, increasing in cost and quality:
 
 ## The job queue
 
-The async capture path writes to a `capture_jobs` SQLite table (status: `queued` → `running` → `done` / `failed`). A single in-process worker drains it with `asyncio.to_thread` + a per-job timeout.
+The async capture path writes to a `capture_jobs` SQLite table (status: `queued` → `running` → `done` / `failed`). A worker drains it with `asyncio.to_thread` + a per-job timeout. The worker is single by default; raise it with `AMPERSTAND_CAPTURE_WORKERS` if you've sized the box for it.
 
-You can inspect the queue at any time:
+Inspect the queue at any time:
 
 ```bash
 curl -H "Authorization: Bearer $KEY" $URL/jobs?limit=20
