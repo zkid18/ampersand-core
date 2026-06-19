@@ -15,41 +15,18 @@ That's the entire architecture. One server. N clients. HTTP between them.
 ## Architecture
 
 ```
-   ┌────────────────────────────────────────────────────────────┐
-   │  Clients  (any HTTP client speaking the API)               │
-   │                                                            │
-   │  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌──────────────┐  │
-   │  │  CLI    │  │ Telegram │  │ Chrome  │  │  your agent  │  │
-   │  │ amper-  │  │   bot    │  │  ext.   │  │  / script    │  │
-   │  │ stand   │  │          │  │         │  │  / anything  │  │
-   │  └────┬────┘  └────┬─────┘  └────┬────┘  └──────┬───────┘  │
-   │       │            │              │              │         │
-   └───────┼────────────┼──────────────┼──────────────┼─────────┘
-           │            │              │              │
-           └────────────┴──────┬───────┴──────────────┘
-                               │  HTTP + API key
-                               │
-                       ┌───────▼──────────┐
-                       │  amperstand-core │   ← the server
-                       │                  │
-                       │  extractors      │
-                       │  vault store     │
-                       │  feed registry   │
-                       │  job queue       │
-                       │  search index    │
-                       └────────┬─────────┘
-                                │
-                                │  reads & writes
-                                │
-                       ┌────────▼─────────┐
-                       │  vault dir       │   ← markdown files on disk
-                       │  .store/meta.db  │   ← SQLite index (rebuildable)
-                       └──────────────────┘
+   ┌───────────┐   ┌──────────────┐   ┌────────────┐   ┌─────────────┐
+   │    CLI    │   │ Telegram bot │   │ Chrome ext │   │  anything   │
+   └─────┬─────┘   └──────┬───────┘   └──────┬─────┘   └──────┬──────┘
+         │                │                  │                │
+         └────────────────┴────────┬─────────┴────────────────┘
+                                   │  HTTP + API key
+                           ┌───────▼──────────┐
+                           │  amperstand-core │
+                           └──────────────────┘
 ```
 
-**The server is the only process that touches the vault directory.** Clients send a URL or some content, get back JSON. They never read or write the markdown files directly.
-
-**Clients are interchangeable.** Today we ship a CLI, a Telegram bot, and a Chrome extension. Each is ~300–600 lines of code wrapping the same six or seven HTTP endpoints. Build a Discord bot, a CLI in Go, an iOS Shortcut, an n8n flow — the server doesn't know or care.
+**Clients are interchangeable.** Today we ship a CLI, a Telegram bot, and a Chrome extension. Build a Discord bot, an iOS Shortcut, an n8n flow — the server doesn't care which client made the request.
 
 ## What it captures
 
