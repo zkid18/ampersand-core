@@ -1,0 +1,270 @@
+---
+title: Step-by-step install (no prior server experience)
+description: "Full walkthrough from 'I don't have a server' to 'I just captured my first URL'. About 30 minutes."
+---
+
+If you've never deployed a server before, this page walks you through every step. The [Quickstart](/quickstart) is the express version for people who know what `ssh root@…` does and already have a droplet — if that's you, use that page instead.
+
+We'll use **DigitalOcean** for the server because their $4 droplet is the reference target and their UI is friendly. Hetzner, Vultr, or your home server work the same way; the bootstrap script doesn't care.
+
+## What you'll need
+
+| | |
+| --- | --- |
+| A credit card | DigitalOcean charges ~$4–6/mo for the droplet, billed hourly. They give first-time accounts $200 of credit for 60 days. |
+| A computer with a terminal | macOS Terminal, Linux any terminal, Windows: PowerShell or Windows Terminal |
+| An SSH key | We'll generate this in Step 1 — if you don't have one already |
+| An OpenAI API key (recommended) | For semantic search + the deep-research skill. [Get one here](https://platform.openai.com/api-keys). $5 prepaid covers months of personal use. |
+| ~30 minutes | First-timers; ~10 minutes once you've done it once |
+
+If you skip the OpenAI key, you'll still get keyword search + capture working. See [What this server depends on](/quickstart#what-this-server-depends-on-read-first) for the full feature breakdown.
+
+## Step 1: Generate an SSH key (if you don't have one)
+
+An SSH key is how your laptop proves "it's me" to the server, instead of typing a password every time.
+
+Open your terminal and run:
+
+```bash
+ls -la ~/.ssh/id_ed25519.pub
+```
+
+If you see a file there, **skip to Step 2** — you already have a key.
+
+If you get "No such file or directory", generate one:
+
+```bash
+ssh-keygen -t ed25519 -C "your-email@example.com"
+```
+
+Press Enter at every prompt to accept defaults. (Optional passphrase — encrypts the key file on disk; you'll be asked to type it once per terminal session.)
+
+Now print the public part:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy the entire output starting with `ssh-ed25519`. You'll paste this in Step 3.
+
+## Step 2: Sign up for DigitalOcean
+
+1. Go to [digitalocean.com](https://www.digitalocean.com/) → "Sign Up".
+2. Create the account, verify email, add a payment method.
+3. (First-time accounts get $200 of credit. Don't burn it on a giant machine — a $4 droplet is fine.)
+
+## Step 3: Create the droplet
+
+In the DigitalOcean dashboard:
+
+1. Top-right corner → **Create** → **Droplets**.
+2. **Region**: pick one near you (NYC for US-East, AMS for Europe, BLR for India, etc.). Doesn't matter much for personal use.
+3. **OS**: Ubuntu, latest LTS (24.04 at time of writing).
+4. **Plan**:
+   - Type: **Basic**
+   - CPU: **Regular** (not Premium)
+   - Size: **$4/mo** (1 GB RAM / 1 vCPU / 25 GB SSD) — the reference target
+5. **Authentication**: **SSH Key** (not Password). Click "New SSH Key" → paste the `ssh-ed25519 …` you copied in Step 1 → name it "my-laptop".
+6. **Hostname**: anything — `amperstand-vault` works.
+7. **Create Droplet** at the bottom.
+
+Wait ~30 seconds. The droplet appears in your dashboard with an IP address like `68.183.29.223`. Copy that IP.
+
+## Step 4: SSH in
+
+From your laptop terminal:
+
+```bash
+ssh root@<your-droplet-ip>
+```
+
+First time: it'll ask `Are you sure you want to continue connecting (yes/no)?` — type `yes`.
+
+You should land at a prompt like:
+
+```
+root@amperstand-vault:~#
+```
+
+You're inside your server.
+
+## Step 5: Run the bootstrap
+
+Still on the server (same terminal):
+
+```bash
+git clone https://github.com/zkid18/ampersand-core /opt/amperstand/amperstand-core
+cd /opt/amperstand/amperstand-core
+sudo bash deploy/bootstrap.sh
+```
+
+This installs everything: Python, Caddy (web server), systemd units, the firewall config. Takes about 3–5 minutes.
+
+When it finishes, it prints something like:
+
+```
+==> Bootstrap complete!
+Your API key: 9b0d3b09df0be9eda282e11eb1ea8cece179be06d5916d67aae0cd376c78f8f9
+   (this is the only time you'll see it — save it now!)
+==> Server is running at: http://<your-droplet-ip>
+```
+
+**Copy the API key into a notes app NOW.** It's not retrievable. (You can rotate it later if you lose it; that's covered in [Deployment](/deployment).)
+
+## Step 6: Add the OpenAI key (recommended)
+
+Without this, semantic search and the deep-research skill don't work. (Keyword search and capture still do.)
+
+Still on the server:
+
+```bash
+sudo nano /etc/amperstand/env
+```
+
+You'll see a few lines like `AMPERSTAND_API_KEY=...`, `AMPERSTAND_DATA_DIR=...`. Add a new line:
+
+```
+OPENAI_API_KEY=sk-proj-...
+```
+
+(Paste the OpenAI key you got from [their dashboard](https://platform.openai.com/api-keys).)
+
+Save: `Ctrl-O`, `Enter`, `Ctrl-X`.
+
+Restart:
+
+```bash
+sudo systemctl restart amperstand-server
+```
+
+## Step 7: Verify the server is running
+
+From the droplet:
+
+```bash
+curl http://localhost/health
+# {"status":"ok"}
+```
+
+Or from your laptop:
+
+```bash
+curl http://<your-droplet-ip>/health
+```
+
+Both should return `{"status":"ok"}`.
+
+If they don't: `sudo journalctl -u amperstand-server -n 50` on the server shows the last 50 log lines.
+
+## Step 8: Install the CLI on your laptop
+
+Type `exit` to leave the server. Back on your laptop:
+
+```bash
+pip install amperstand
+```
+
+(If you don't have pip / Python on your laptop, install Python 3.10+ from [python.org](https://www.python.org/downloads/) first. macOS users: `brew install python` works too.)
+
+## Step 9: Connect the CLI to your server
+
+Save your server's API key safely on the laptop:
+
+```bash
+echo "<paste the API key from Step 5>" > ~/.amperstand-api-key
+chmod 600 ~/.amperstand-api-key
+```
+
+Add to your shell rc so it loads automatically in new shells:
+
+```bash
+echo 'export AMPERSTAND_API_KEY="$(cat ~/.amperstand-api-key | tr -d "\n")"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+(Replace `~/.zshrc` with `~/.bashrc` if you're on bash.)
+
+Point the CLI at your server:
+
+```bash
+amperstand vault backend set-http http://<your-droplet-ip> \
+    --api-key-env AMPERSTAND_API_KEY
+```
+
+<Warning>
+`--api-key-env AMPERSTAND_API_KEY` is **the name of an environment variable**, not the value of the key. The CLI stores the name and reads the value at runtime — that's how rotation stays cheap.
+</Warning>
+
+## Step 10: Capture your first URL
+
+```bash
+amperstand capture https://danluu.com/why-hardware-development-is-hard/
+```
+
+You should see:
+
+```
+Saved: 01JK8XQ4... — Why hardware development is hard
+  vault/2026/06/why-hardware-development-is-hard.md
+```
+
+🎉 Your vault is live.
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Set up the Telegram bot" icon="message" href="/examples/telegram-bot">
+    Capture URLs from your phone by DMing them to a personal bot.
+  </Card>
+  <Card title="Production hardening" icon="shield" href="/deployment">
+    Add a domain + TLS, configure backups, rotate keys, harden systemd.
+  </Card>
+  <Card title="Deep-research skill" icon="book" href="/agent-skill">
+    Multi-phase research over your vault from Claude Code.
+  </Card>
+  <Card title="Browse the API" icon="code" href="/api-reference/overview">
+    The HTTP surface every client speaks.
+  </Card>
+</CardGroup>
+
+## When things go wrong
+
+### "Permission denied (publickey)" when I SSH
+
+DigitalOcean didn't get your SSH key added properly. In the dashboard: Droplet → Access → "Reset root password" (last resort), or **better**: Settings → Security → SSH Keys → add yours → then destroy the droplet and recreate it with the key attached.
+
+### Bootstrap failed halfway
+
+Re-run it: `cd /opt/amperstand/amperstand-core && sudo bash deploy/bootstrap.sh`. It's idempotent — re-running picks up where it failed.
+
+### `curl http://<ip>/health` hangs
+
+The firewall might not have opened port 80, or Caddy didn't start. On the server:
+
+```bash
+sudo systemctl status amperstand-server
+sudo systemctl status caddy
+sudo ufw status
+```
+
+If Caddy isn't running: `sudo systemctl start caddy`. If UFW blocks port 80: `sudo ufw allow 80`.
+
+### The CLI says "API key invalid"
+
+Either you typed the key wrong, or your env var isn't set in the current shell. Check:
+
+```bash
+echo $AMPERSTAND_API_KEY    # should print 64 hex chars
+amperstand vault backend show
+```
+
+If the env var is empty: `source ~/.zshrc` (or just open a new terminal).
+
+### My droplet is consuming budget faster than expected
+
+The $4 droplet bills hourly at ~$0.006/hr. Idle: ~$4/mo. If you destroy a droplet, billing stops. If you just turn it off but don't destroy, **you're still billed**. To stop billing: dashboard → droplet → Destroy.
+
+## When to ask for help
+
+- The bootstrap output mentions a specific error → search the [GitHub issues](https://github.com/zkid18/ampersand-core/issues) for the error string
+- Something fundamental doesn't work → open an issue with the exact error message + the output of `sudo systemctl status amperstand-server`

@@ -5,6 +5,10 @@ description: "Run an Amperstand vault server on a fresh Ubuntu droplet in under 
 
 This page sets up the server that stores your vault and exposes the HTTP API. Once it's running, install [the CLI](/cli-install) on your laptop to talk to it.
 
+<Info>
+**Never deployed a server before?** Start with the [step-by-step install guide](/server-walkthrough) — it walks you from "I don't have a server" through "I just captured my first URL" with every click and command spelled out. About 30 min for a first-timer. This page is the express version for people who already have a droplet and know what `ssh root@…` does.
+</Info>
+
 ## What this server depends on (read first)
 
 Amperstand is not fully self-contained. Most of the headline features depend on third-party APIs you bring yourself. Be honest with yourself about the costs and the data flow before you deploy.
@@ -53,17 +57,6 @@ AMPERSTAND_PROXY_URL=http://user:pass@residential-proxy-host:port
 ```
 
 Cost: **$25–50/mo** for a Webshare/Bright Data/IPRoyal residential plan. Or run your own (Squid behind a tunnel from a home machine). Cheaper alternative: tolerate the YouTube/X capture-failure rate from a bare droplet.
-
-### Summary — what you'll likely pay per month
-
-| Setup | Monthly |
-| --- | --- |
-| Bare droplet, FTS5 search only, no proxy | **$4** (droplet) |
-| + OpenAI for embeddings + semantic search | +$1–5 (depends on capture volume) |
-| + Residential proxy for YouTube/X coverage | +$25–50 |
-| **Total for the full feature set** | **~$30–60/mo** |
-
-Most of that is the proxy. If you skip it, expect YouTube captures to fail ~30–60% of the time from a fresh droplet IP.
 
 ## Prerequisites
 
