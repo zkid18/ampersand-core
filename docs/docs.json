@@ -19,7 +19,8 @@
             "pages": [
               "introduction",
               "server-walkthrough",
-              "quickstart"
+              "quickstart",
+              "server-install-docker"
             ]
           },
           {

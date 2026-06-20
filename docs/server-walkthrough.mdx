@@ -202,9 +202,19 @@ If they don't: `sudo journalctl -u amperstand-server -n 50` on the server shows 
 
 ## Step 8: Install the CLI on your laptop
 
-Type `exit` to leave the server. Back on your laptop:
+Type `exit` to leave the server. Back on your laptop, install `amperstand` — Python CLI, ~5 MB, works on macOS/Linux/Windows-WSL.
+
+Pick one (any of these gets you the same `amperstand` binary):
 
 ```bash
+# Recommended — pipx isolates the install so it can't conflict with anything else.
+# On macOS: brew install pipx. On Linux: apt install pipx.
+pipx install amperstand
+
+# Or — uv (fast, Rust-based, same isolation as pipx)
+uv tool install amperstand
+
+# Or — plain pip (works fine; uses your active Python env)
 pip install amperstand
 ```
 

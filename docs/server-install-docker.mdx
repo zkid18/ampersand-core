@@ -1,0 +1,177 @@
+---
+title: Install with Docker Compose
+description: "`docker compose up -d` your vault. For homelab operators who want this in their compose stack next to Paperless, Karakeep, and friends."
+---
+
+The repo ships a `Dockerfile` + `docker-compose.yml` + `Caddyfile.docker` in `deploy/`. Everything is bind-mounted, configured via `.env`, and lives behind Caddy on `:80` / `:443`. No `apt install`, no host systemd units, no writes to `/etc/` or `/opt/` outside the repo.
+
+<Note>
+This is the install path for the homelab persona — *if you can't `docker compose up` it, you're not interested.* If you're closer to "fresh DigitalOcean droplet, never deployed before," use the [step-by-step guide](/server-walkthrough) which runs bootstrap.sh on the host. Both approaches end in the same place (a vault behind Caddy), just with different host footprints.
+</Note>
+
+## What you need
+
+- A Linux host with **Docker Engine 24+** and **Docker Compose v2** (`docker compose`, not the old `docker-compose`)
+- ~1 GB RAM (Python deps spike during boot, then settle ~150 MB)
+- A few GB of disk for the vault (markdown compresses well — a 10k-doc vault is well under 1 GB)
+- (Optional) A domain you can point an A record at — for TLS
+
+Skip the rest of this section if you've got a working Docker host already.
+
+```bash
+# Ubuntu 22.04+ / Debian 12 / etc.
+curl -fsSL https://get.docker.com | sudo bash
+sudo usermod -aG docker $USER
+newgrp docker   # or log out and back in
+docker compose version
+# → Docker Compose version v2.x.y
+```
+
+## Quick start
+
+```bash
+git clone https://github.com/zkid18/ampersand-core /opt/amperstand-core
+cd /opt/amperstand-core/deploy
+
+# Generate the API key + optional OpenAI key into .env (one time):
+echo "AMPERSTAND_API_KEY=$(openssl rand -hex 32)" > .env
+# Optional but recommended (semantic search, hybrid rerank, Whisper):
+# echo "OPENAI_API_KEY=sk-..." >> .env
+
+docker compose up -d
+docker compose logs -f
+```
+
+That's it. Caddy proxies `:80` → `server:8765`. Hit:
+
+```bash
+curl http://localhost/health
+# {"status":"ok"}
+
+curl -H "Authorization: Bearer $(grep AMPERSTAND_API_KEY .env | cut -d= -f2-)" \
+     http://localhost/v1/docs
+# {"items":[],"next_cursor":null}
+```
+
+## What's in the stack
+
+```yaml
+services:
+  server:       # Python 3.12-slim, uvicorn :8765
+    image: built from deploy/Dockerfile
+    volumes:
+      - vault:/var/lib/amperstand
+  caddy:        # caddy:2-alpine, :80 + :443
+    volumes:
+      - ./Caddyfile.docker:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  vault:        # your vault data (markdown + .store/meta.db)
+  caddy_data:   # Caddy's autocert certs
+  caddy_config: # Caddy's runtime config
+```
+
+## What's NOT in the stack
+
+The compose file is **server-only**. These run as separate processes outside the compose, or as their own containers if you write them:
+
+| Component | Why it's not bundled |
+| --- | --- |
+| Telegram bot | Lives in a separate repo ([`amperstand-bot`](https://github.com/zkid18/ampersand-tg-bot)). One bot per Amperstand server is the usual shape, but yours may not need one — bundling forces the dep. |
+| Browser extension | Runs in your browser, not on the host. |
+| Email watcher | Needs interactive IMAP setup (credentials, OAuth flow). Bundle once your config is stable. |
+| Vault watcher | Auto-reindexes hand-edited files. Bundle if you edit markdown directly in mounted volumes. |
+| Feed sync timer | Bundle as a sidecar with a cron loop, OR run as a host cron hitting the compose'd server. |
+
+The [bare-metal install path](/quickstart) sets all of these up via systemd units. For Docker, you add each as you need it.
+
+## Volumes — where your data actually lives
+
+The `vault` named volume holds:
+
+```
+/var/lib/amperstand/
+└── vault/
+    ├── 2026/06/<slug>.md       ← your markdown
+    ├── .store/meta.db          ← SQLite index
+    ├── .store/by-id/...        ← stable id lookup
+    └── .classifier/            ← newsletter filter (if you use email)
+```
+
+Find it on the host:
+
+```bash
+docker volume inspect amperstand-core_vault
+# → "Mountpoint": "/var/lib/docker/volumes/amperstand-core_vault/_data"
+```
+
+For backups, treat the named volume the same way the bare-metal docs treat `/var/lib/amperstand/vault/` — see [Backups](/deployment#backups). The encrypted-env recipe still applies; in Docker you encrypt `./.env` instead of `/etc/amperstand/env`.
+
+## TLS in production
+
+The shipped `Caddyfile.docker` listens on `:80` HTTP only. For production, swap to `Caddyfile.tls` (also in `deploy/`) and point a domain at the host:
+
+```bash
+# Edit deploy/Caddyfile.tls — replace the placeholder hostname with yours.
+
+# In docker-compose.yml, swap the Caddy volume mount:
+#   - ./Caddyfile.tls:/etc/caddy/Caddyfile:ro     ← TLS
+# instead of:
+#   - ./Caddyfile.docker:/etc/caddy/Caddyfile:ro  ← HTTP
+
+docker compose up -d caddy
+```
+
+Caddy will request a Let's Encrypt cert on first start and renew automatically. After that, your CLI connects via `https://your-domain` and the API key never crosses the wire in plaintext again.
+
+## Updating the image
+
+```bash
+cd /opt/amperstand-core
+git pull
+cd deploy
+docker compose build server
+docker compose up -d
+```
+
+The vault volume persists across `docker compose down && up`, even if you `rm -f` the containers. The data only dies if you explicitly `docker volume rm amperstand-core_vault`.
+
+## Running the admin CLI
+
+`amperstand-admin` lives inside the `server` container:
+
+```bash
+# Show stats
+docker compose exec server amperstand-admin stats
+
+# Rotate the API key (writes to /etc/amperstand/env INSIDE the container — but
+# you're using .env on the host, so this isn't the path you want for compose.)
+# Instead: regenerate the AMPERSTAND_API_KEY value in .env, then restart:
+echo "AMPERSTAND_API_KEY=$(openssl rand -hex 32)" > .env
+# (re-add OPENAI_API_KEY etc.)
+docker compose up -d server
+
+# Reindex the meta sidecar from markdown
+docker compose exec server amperstand-admin reindex
+
+# Backfill embeddings
+docker compose exec server amperstand-admin vec-rebuild
+```
+
+<Warning>
+For Docker, `amperstand-admin rotate-key --env-file` inside the container won't survive a container restart (the file lives in container-local state, not the mounted host `.env`). Rotate via host `.env` + `docker compose up -d`. The 25-second graceful-drain caveat from [Authentication](/api-reference/authentication#rotating-the-key) still applies.
+</Warning>
+
+## Stop / remove
+
+```bash
+docker compose down              # stop containers, keep data
+docker compose down -v           # stop + DROP the vault volume. Destructive.
+```
+
+Always run a backup before `down -v`.
+
+## Connect the CLI
+
+Same as the bare-metal path — see [Install the CLI](/cli-install). The CLI doesn't care whether the server is running on systemd, in Docker, or as a process you launched by hand.

@@ -7,13 +7,40 @@ The CLI is `amperstand` — a tiny HTTP client (~5 MB install, two dependencies)
 
 ## 1. Install
 
-```bash
+`amperstand` is a Python CLI. Pick whichever installer matches your habits — they all end up with the same `amperstand` binary on your `$PATH`.
+
+<CodeGroup>
+
+```bash pipx (recommended)
+# pipx isolates each CLI in its own venv, so amperstand can't break (or be
+# broken by) anything else you've got installed. On macOS: `brew install pipx`.
+pipx install amperstand
+```
+
+```bash uv
+# Fast Rust-based installer. Same venv isolation as pipx.
+uv tool install amperstand
+```
+
+```bash pip
+# Standard pip — works fine, but installs into your active Python env.
+# If you've never thought about this and don't have pipx, this is OK.
 pip install amperstand
 ```
 
-That's it. The CLI does no extraction itself — every command translates to a REST call against your server. So no Playwright, no yt-dlp, no heavy ML libs.
+```bash Docker
+# Run the CLI as a one-shot container. Good for CI / scripts where you
+# don't want a Python install at all.
+docker run --rm -e AMPERSTAND_API_KEY \
+  -v ~/.amperstand:/root/.amperstand \
+  ghcr.io/zkid18/amperstand:latest <command>
+```
 
-Requires Python 3.10+.
+</CodeGroup>
+
+The CLI does no extraction itself — every command translates to a REST call against your server. So no Playwright, no yt-dlp, no heavy ML libs regardless of installer.
+
+Requires Python 3.10+. **Homebrew formula**: not on the roadmap yet — if you'd find one useful, open an issue.
 
 ## 2. Get your API key
 
