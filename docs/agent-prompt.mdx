@@ -144,17 +144,31 @@ for i, doc_id in enumerate(sorted(doc_ids), start=1):
         headers={"Authorization": f"Bearer {os.environ['AMPERSTAND_API_KEY']}"},
     ).json()
     fm = doc["frontmatter"]
-    footnotes.append(
-        f"{i}. {fm.get('author','Unknown')}. "
-        f"*{fm['title']}*. {fm.get('source')}. "
-        f"Published: {fm.get('published_at','n.d.')}."
-    )
+    source = fm.get("source")
+    title = fm.get("title", "Untitled")
+    author = fm.get("author", "Unknown")
+    published = fm.get("published_at", "n.d.")
+
+    if source:
+        footnotes.append(
+            f"{i}. {author}. *{title}*. {source}. Published: {published}."
+        )
+    else:
+        # Doc has no source URL (hand-written note, Telegram text, .eml without
+        # link). Cite the body as a personal-communication-style footnote.
+        footnotes.append(
+            f"{i}. {author}. *{title}*. Personal archive, {published}."
+        )
     draft = draft.replace(f"[{doc_id}]", f"[^{i}]")
 
 print(draft)
 print("\n---\n")
 print("\n".join(footnotes))
 ```
+
+<Note>
+**Render footnotes deterministically in code — not via the LLM.** The pseudocode above is safe: only the agent's draft text goes through the LLM; the citation lookup happens after, in Python. If you instead instruct the LLM to fetch + format the source URL itself, your sensitive source URLs end up in another LLM round-trip context window. For investigative work where sources need protection, the in-code render path is the only safe one.
+</Note>
 
 This converts the LLM's internal `[doc_id]` markers into proper `[^1]`-style footnote references and emits a publication-ready footnote block. Paste that into your draft.
 

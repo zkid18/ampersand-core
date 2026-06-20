@@ -33,7 +33,7 @@ That's the entire architecture. One server. N clients. HTTP between them.
 | Surface | Extractor |
 | --- | --- |
 | Articles & blog posts | trafilatura, Playwright fallback for JS-heavy pages |
-| YouTube videos | `yt-dlp` metadata + transcript API + optional Whisper fallback |
+| YouTube videos | `yt-dlp` metadata + transcript API + optional Whisper fallback. Captions are saved with `[MM:SS]` timestamps preserved — good enough to footnote a specific minute in a published piece. |
 | LinkedIn posts | URL-shape extractor |
 | Twitter / X | `fxtwitter` rewrite + thread reconstruction |
 | RSS / Atom feeds | `feedparser` + per-item extraction |

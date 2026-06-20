@@ -47,6 +47,42 @@ Every captured doc has these frontmatter fields. Field names and types are part 
 
 User-extensible: you can add **any other key** to the frontmatter via the `frontmatter` map on `POST /capture` (or by editing the file). The server preserves unknown keys verbatim and never strips them.
 
+<Note>
+`captured_at` is an alias of `created_at` we still emit for backward compatibility with older clients. Bet on `created_at` for new Dataview queries — `captured_at` may stop being written in a future minor release. Both have identical values today; nothing breaks during the transition.
+</Note>
+
+### Slug stability (filename you query against)
+
+The on-disk filename is the slug of the title (`why-hardware-development-is-hard.md`). The slug is deterministic for a given `id` and gets locked in at first-capture time. **Re-capturing the same URL never re-slugs the file**, even if the upstream title changes — the original filename and the original `id` are stable forever. That keeps your `[[wikilinks]]` from rotting silently.
+
+The slugifier strips/replaces:
+- Anything not `[a-z0-9-]` (so unicode titles round-trip to ASCII-ish)
+- Trailing punctuation
+- Whitespace runs → single `-`
+
+Collisions (two different URLs producing the same slug from the same month) are resolved by appending `-2`, `-3`, etc. to the second/third filename.
+
+### Extraction fidelity (what survives HTML → markdown)
+
+| What | Behavior | Caveats |
+| --- | --- | --- |
+| Headings (`<h1>`–`<h6>`) | Preserved with correct level | The page's own `<h1>` is dropped (we use the frontmatter `title`) |
+| Code fences | Preserved with language hint when the HTML element has a `language-foo` / `lang-foo` class | Nested fences in articles are flattened to one level |
+| Inline code | `\`backticks\`` preserved | — |
+| Lists (ordered + unordered) | Preserved, nesting preserved | — |
+| Tables | GFM `|---|---|` syntax | Merged cells (`rowspan`/`colspan`) collapsed to first cell |
+| Blockquotes | `>` preserved | — |
+| Footnotes | Inline `[^1]` style preserved when source has them | Endnotes-section-only articles lose the back-link |
+| Math | LaTeX `$...$` and `$$...$$` preserved when source uses them | MathJax-rendered SVGs aren't re-extracted |
+| Links | Markdown `[text](url)` | Relative URLs are NOT resolved against the page's base URL today |
+| Images | Markdown `![alt](url)` with the original CDN URL (hot-linked) | Images are NOT downloaded into the vault. If the source goes 404, the image dies with it. On the roadmap; not built. |
+| Tweets / X embeds | Captured as a quoted snippet with the tweet URL | Thread reconstruction works for the same author; mixed-author threads sometimes miss replies |
+| YouTube embeds in articles | Replaced with `[YouTube: <title>](<url>)` | Doesn't pull the transcript into the article — capture the video URL separately for that |
+
+This isn't exhaustive — the trafilatura + custom transforms in `extractors/` handle a lot. But these are the fidelity guarantees we commit to keeping.
+
+If you find content that breaks the contract (a code fence that loses its language, a table that mangles), it's a bug — open an issue with the source URL and we'll add a regression test.
+
 ### What happens on re-capture of the same URL?
 
 Re-capturing a URL the vault already has is a **no-op for everything except the body**:

@@ -17,6 +17,8 @@ The full source is below. Copy-paste it into a file in your Claude config; no gi
 
 <Warning>
 **Rerank uses an LLM.** When you set `rerank=true` (the skill's default), your query plus the top retrieved passages are sent to OpenAI's `gpt-4o-mini` via your server's `OPENAI_API_KEY`. For confidential corpora (embargoed research, due-diligence work), set `rerank=false` in the skill's curl bodies. The fused BM25 + vector ranking still works; you just lose the LLM re-sort pass.
+
+**And separately** — embedding generation at *capture time* also sends doc bodies to OpenAI. That's irreversible: once the body went out, you can't un-send it. If your corpus is fully confidential, disable embeddings on the server entirely (unset `OPENAI_API_KEY`) and run keyword-only search. See [the server's OpenAI dependency table](/quickstart#what-this-server-depends-on-read-first) for the full data-flow picture.
 </Warning>
 
 ## SKILL.md
@@ -429,6 +431,62 @@ curl -s <your-server>/vault/01KR547PA7YJMQCJT1TDJKCCMD/related?limit=10 \
 
 You are the user's research partner over their own captured knowledge. Everything you cite is from the vault.
 ````
+
+## What the output looks like
+
+The skill drops everything under `./{topic_slug}/` in the current dir. The final artifact is `report.md`:
+
+```markdown
+# AI Coding History 2020–2026
+
+Vault coverage: 73% (12 items, 47 cited docs)
+
+## Table of contents
+
+| Item                     | Valuation     | Released  | Vault |
+|--------------------------|---------------|-----------|-------|
+| [GitHub Copilot]         | (Microsoft)   | Jun 2021  | 92%   |
+| [Cursor]                 | $9B (2025)    | Apr 2022  | 88%   |
+| [Replit Ghostwriter]     | $1.16B (2023) | Mar 2022  | 67%   |
+| [Codeium]                | $1.25B (2024) | Aug 2022  | 71%   |
+| [Aider]                  | (OSS)         | Jun 2023  | 45% ⚠ |
+
+## Cursor
+
+**Valuation**: $9B (Anysphere Series C, 2025) [01KR8X9P…](https://your-server/ui/#/doc/01KR8X9P)
+**Released**: April 2022 [01KSQ1ZM…](https://your-server/ui/#/doc/01KSQ1ZM)
+**Founders**: Aman Sanger, Sualeh Asif, Arvid Lunnemark, Michael Truell [01KR8X9P…]
+**Pricing pivot**: Moved from $20 flat → usage-based in May 2025 after burn-rate
+  pressure [01KSY4QT…](https://your-server/ui/#/doc/01KSY4QT)
+**Key acquisition**: Acquired Supermaven in October 2024 for ~$200M [01KR8X9P…]
+
+## Aider
+
+**Founders**: Paul Gauthier [01KR4P5T…]
+**Repo stats**: 50k+ GitHub stars [01KR4P5T…]
+**Valuation**: [uncertain]   ← vault has no funding info; capture more if needed
+
+…
+
+---
+
+## Vault contribution
+
+Most-cited docs:
+1. saint hills, "the untold story of AI coding" — 18 citations
+2. Stratechery, "Cursor's pricing pivot" — 12 citations
+3. …
+
+## Capture suggestions
+
+Items with thin vault coverage. Capture more on these before re-running:
+- Aider (45%): no funding/revenue data
+- Cody (33%): no founder history
+```
+
+The `[doc_id]` markers become clickable links to your web UI; cited values get their own backrefs. The TOC's "Vault" column tells you which items the vault answered cleanly vs which need more capture before the next pass.
+
+For turning the report into a publication-ready footnote format (with `source:` URLs instead of internal doc-id links), see [Citing vault docs in a public piece](/agent-prompt#citing-vault-docs-in-a-public-piece).
 
 ## When to use this vs other agent surfaces
 
