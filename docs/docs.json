@@ -23,7 +23,6 @@
           {
             "group": "Set up a server",
             "pages": [
-              "server-walkthrough",
               "quickstart",
               "server-install-docker"
             ]

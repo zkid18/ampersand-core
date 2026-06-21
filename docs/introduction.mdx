@@ -47,17 +47,14 @@ All extraction runs **on the server**. Clients just hand over a URL (or HTML, or
 - **Data sovereignty.** The vault is plain markdown files on a server you own. The tool can disappear; the files don't.
 - **Stable surface.** The HTTP API is the contract. Build any client in any language. Your own agents query the same endpoints the bot does.
 
-## Set up your server — pick a path
+## Set up your server
 
-<CardGroup cols={3}>
-  <Card title="First server ever" icon="hand-holding-heart" href="/server-walkthrough">
-    30-min hand-held walkthrough. DigitalOcean signup, SSH keys, dashboard clicks, bootstrap. No prior server experience needed.
+<CardGroup cols={2}>
+  <Card title="Bare-metal install (one page)" icon="rocket" href="/quickstart">
+    Clone, run `bootstrap.sh`, capture a URL. One canonical path with an expandable DigitalOcean walkthrough for first-timers. ~10 min if you have a host, ~30 if you're starting from scratch.
   </Card>
-  <Card title="Have an Ubuntu host" icon="rocket" href="/quickstart">
-    10-min express setup. You have a droplet and know SSH. Clone the repo, run `bootstrap.sh`, done.
-  </Card>
-  <Card title="Prefer Docker" icon="docker" href="/server-install-docker">
-    `docker compose up -d`. Homelab-friendly, drops into your existing compose stack.
+  <Card title="Docker Compose" icon="docker" href="/server-install-docker">
+    `docker compose up -d`. Homelab-friendly; drops into your existing compose stack.
   </Card>
 </CardGroup>
 
