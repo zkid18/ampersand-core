@@ -12,64 +12,57 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Set up a server",
+        "tab": "Docs",
         "groups": [
           {
             "group": "Start here",
             "pages": [
-              "introduction"
+              "introduction",
+              "concepts"
             ]
           },
           {
-            "group": "Set up a server",
+            "group": "Get a server running",
             "pages": [
               "quickstart",
               "server-install-docker"
             ]
           },
           {
-            "group": "Reference",
-            "pages": [
-              "concepts",
-              "configuration",
-              "deployment",
-              "vault-sync-local"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Use the CLI",
-        "groups": [
-          {
-            "group": "CLI",
+            "group": "Use the CLI",
             "pages": [
               "cli-install",
               "cli-quickstart",
               "cli-reference"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Build with AI agents",
-        "groups": [
+          },
           {
-            "group": "Agents & skills",
+            "group": "Build with AI agents",
             "pages": [
               "agents-overview",
               "agent-shell",
               "agent-skill",
               "agent-prompt"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Build clients",
-        "groups": [
+          },
           {
-            "group": "API reference",
+            "group": "Build a custom client",
+            "pages": [
+              "examples/build-your-own",
+              "examples/telegram-bot",
+              "examples/browser-extension"
+            ]
+          },
+          {
+            "group": "Operate in production",
+            "pages": [
+              "deployment",
+              "configuration",
+              "vault-sync-local"
+            ]
+          },
+          {
+            "group": "HTTP API reference",
             "pages": [
               "api-reference/overview",
               "api-reference/authentication",
@@ -78,14 +71,6 @@
               "api-reference/vault-docs",
               "api-reference/vault-search",
               "api-reference/feeds"
-            ]
-          },
-          {
-            "group": "Examples",
-            "pages": [
-              "examples/telegram-bot",
-              "examples/browser-extension",
-              "examples/build-your-own"
             ]
           }
         ]
