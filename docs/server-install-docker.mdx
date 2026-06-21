@@ -1,13 +1,13 @@
 ---
-title: Install with Docker Compose
-description: "`docker compose up -d` your vault. For homelab operators who want this in their compose stack next to Paperless, Karakeep, and friends."
+title: "Set up a server: Docker Compose"
+description: "`docker compose up -d` your vault. For homelab operators who want this in their compose stack."
 ---
 
 The repo ships a `Dockerfile` + `docker-compose.yml` + `Caddyfile.docker` in `deploy/`. Everything is bind-mounted, configured via `.env`, and lives behind Caddy on `:80` / `:443`. No `apt install`, no host systemd units, no writes to `/etc/` or `/opt/` outside the repo.
 
-<Note>
-This is the install path for the homelab persona — *if you can't `docker compose up` it, you're not interested.* If you're closer to "fresh DigitalOcean droplet, never deployed before," use the [step-by-step guide](/server-walkthrough) which runs bootstrap.sh on the host. Both approaches end in the same place (a vault behind Caddy), just with different host footprints.
-</Note>
+<Info>
+**Not a Docker user?** The [step-by-step](/server-walkthrough) (first server) or [express](/quickstart) (have a host) paths use bare-metal systemd instead. All three end up at the same place (a vault behind Caddy); pick the host footprint you prefer.
+</Info>
 
 ## What you need
 

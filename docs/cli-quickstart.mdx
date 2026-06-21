@@ -1,0 +1,146 @@
+---
+title: Use the CLI
+description: "The six things to know how to do. Capture, see what you've got, search, read a doc, subscribe to a feed."
+---
+
+You've [installed the CLI](/cli-install) and pointed it at a server. This page walks through the operations you'll actually use day-to-day. Paste each command, see real output, move on.
+
+## Capture a URL
+
+The single most-used command. Sends the URL to your server, which fetches and extracts it, then saves the markdown into your vault.
+
+```bash
+amperstand capture https://danluu.com/why-hardware-development-is-hard/
+```
+
+```
+Saved: 01JK8XQ4... — Why hardware development is hard
+  vault/2026/06/why-hardware-development-is-hard.md
+```
+
+The 26-character ID (`01JK8XQ4...`) is the doc's permanent handle — it survives renames and re-captures. The path is where the markdown landed on the server.
+
+Capture works with any URL the extractors recognize:
+
+```bash
+amperstand capture https://www.youtube.com/watch?v=e_NDFEWGW1w   # YouTube → transcript
+amperstand capture https://www.linkedin.com/posts/...             # LinkedIn extractor
+amperstand capture https://twitter.com/user/status/123            # Twitter/X
+amperstand capture https://stratechery.com/2025/cursors-pivot/    # Substack / general article
+```
+
+<Note>
+Re-running `amperstand capture` on a URL you've already captured is a **no-op for your data**: the server returns the existing doc ID rather than creating a duplicate. Edit-in-Obsidian-friendly: any frontmatter `tags` or hand-edited fields you added survive re-capture. See [Frontmatter contract](/concepts#frontmatter-schema-contract) for the full semantics.
+</Note>
+
+## Check what's in your vault
+
+```bash
+amperstand vault status
+```
+
+```
+Server: ok
+Docs: 1,247
+```
+
+Total count, server health. Use this as your "is the connection alive" sanity check.
+
+For a list of recent docs, the CLI doesn't have a wrapper today — hit the API directly:
+
+```bash
+curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  "$AMPERSTAND_BASE_URL/v1/docs?limit=10" \
+  | jq -r '.items[] | "\(.id)  \(.title)"'
+```
+
+## Search the vault
+
+Three search modes — keyword (fast, exact), semantic (slow, conceptual), hybrid (best of both). All via the API:
+
+```bash
+# Keyword — sub-millisecond, exact term match
+curl -s -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"q":"hardware development", "limit":5}' \
+  $AMPERSTAND_BASE_URL/v1/docs/search \
+  | jq -r '.items[] | "\(.id)  \(.title)"'
+
+# Hybrid + rerank — best for "I half-remember this thing about..." queries
+curl -s -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"q":"that post about why chips take so long", "limit":5, "rerank":true}' \
+  $AMPERSTAND_BASE_URL/v1/docs/search/hybrid \
+  | jq -r '.items[] | "\(.score | tonumber | floor)  \(.title)"'
+```
+
+See the full [search reference](/api-reference/vault-search) for the three modes and when to use each. Hybrid + rerank costs ~$0.001 per query (it uses an LLM); keyword search is free.
+
+## Read a doc back
+
+Once you have a doc ID (from capture output, from search results, from `vault status` listing):
+
+```bash
+# JSON with frontmatter + parsed body
+curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  $AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4...
+
+# Raw markdown (frontmatter + body, exactly as on disk)
+curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  $AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4.../raw \
+  > /tmp/article.md
+```
+
+The raw endpoint is what you'd pipe into an editor, an agent, or stick straight into Obsidian.
+
+## Subscribe to a feed
+
+```bash
+amperstand feed add https://danluu.com/atom.xml --name "Dan Luu"
+amperstand feed list
+amperstand feed sync         # pull new items now (server's cron does this automatically)
+```
+
+```
+Subscribed: Dan Luu
+  Dan Luu
+    https://danluu.com/atom.xml
+    last sync: 2026-06-21T03:14:22Z (ok)
+```
+
+The feed registry lives on the server, so subscribing here means the Telegram bot's `/feeds` command (if you run one) shows the same list. The sync cron runs every 30 minutes by default — `feed sync` just kicks it manually.
+
+To unsubscribe:
+
+```bash
+amperstand feed remove <feed-id-or-url>
+```
+
+## Find related docs
+
+You've found a doc you like. What else have you captured on the topic?
+
+```bash
+curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+  "$AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4.../related?limit=10" \
+  | jq -r '.items[] | "\(.id)  \(.title)"'
+```
+
+Related uses embedding similarity — works best when you have `OPENAI_API_KEY` set on the server and have already run `amperstand-admin vec-rebuild` once. Returns the closest 10 docs by content embedding, regardless of whether they share keywords.
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Plug the vault into an agent" icon="robot" href="/agents-overview">
+    Skills, system prompts, shell-out — turn the vault into the corpus your agent queries.
+  </Card>
+  <Card title="Full CLI reference" icon="terminal" href="/cli-reference">
+    Every command, every flag. Use this for grep, not learning.
+  </Card>
+  <Card title="HTTP API reference" icon="code" href="/api-reference/overview">
+    All endpoints. Build your own client in any language.
+  </Card>
+  <Card title="Sync vault to local Obsidian" icon="folder" href="/vault-sync-local">
+    Mirror the server-side markdown into a folder Obsidian opens.
+  </Card>
+</CardGroup>

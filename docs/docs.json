@@ -15,9 +15,14 @@
         "tab": "Set up a server",
         "groups": [
           {
-            "group": "Get started",
+            "group": "Start here",
             "pages": [
-              "introduction",
+              "introduction"
+            ]
+          },
+          {
+            "group": "Set up a server",
+            "pages": [
               "server-walkthrough",
               "quickstart",
               "server-install-docker"
@@ -41,17 +46,19 @@
             "group": "CLI",
             "pages": [
               "cli-install",
+              "cli-quickstart",
               "cli-reference"
             ]
           }
         ]
       },
       {
-        "tab": "Embed in agents",
+        "tab": "Build with AI agents",
         "groups": [
           {
             "group": "Agents & skills",
             "pages": [
+              "agents-overview",
               "agent-shell",
               "agent-skill",
               "agent-prompt"

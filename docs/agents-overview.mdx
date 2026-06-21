@@ -1,0 +1,74 @@
+---
+title: Build with AI agents
+description: "Make your vault the corpus your agent queries. Three patterns — pick the one that matches your stack."
+---
+
+Your vault is a private, curated knowledge store — newsletters you trust, transcripts you sat through, articles you saved on purpose. Plugged into an AI agent, that becomes a research surface no public LLM can match: cited, owned, free of SEO landfill.
+
+This page is the front door. Three integration patterns, increasing in sophistication.
+
+## Pick a pattern
+
+<CardGroup cols={3}>
+  <Card title="Shell-out" icon="terminal" href="/agent-shell">
+    Your agent runs `amperstand capture <url>` as a shell command. Works in Claude Code, Cursor, n8n, custom Python agents. **15 minutes to wire up.**
+  </Card>
+  <Card title="Claude Skill" icon="sparkles" href="/agent-skill">
+    Install the `vault-research` skill. End-to-end multi-phase research workflow: scope → refine → research → cited report. **For Claude Code users specifically.**
+  </Card>
+  <Card title="System prompt" icon="message" href="/agent-prompt">
+    Drop a paste-ready system prompt into Custom GPTs, Claude Projects, Cursor `.cursorrules`, n8n LLM nodes. Cites doc IDs, refuses to invent. **Framework-agnostic.**
+  </Card>
+</CardGroup>
+
+## Which one is right for me?
+
+| If your stack is… | Use… |
+| --- | --- |
+| Claude Code | The [Claude Skill](/agent-skill) for research workflows, [shell-out](/agent-shell) for ad-hoc capture / search. Both work; the skill is more guided. |
+| Cursor | The [system prompt](/agent-prompt) (`.cursorrules`) for read-side queries. Add [shell-out](/agent-shell) commands to your rules file for `capture`. |
+| Custom GPT / Claude Project | The [system prompt](/agent-prompt). Wire the HTTP API as a configured Action; the prompt teaches the model how to use it. |
+| n8n / Make / Zapier | The [system prompt](/agent-prompt) in your LLM node, HTTP Request nodes for the actual calls. |
+| Your own Python / TS agent code | The HTTP API directly — see [Build your own client](/examples/build-your-own). The system prompt is still useful as a guide for what to teach your model about. |
+| Just want to ask questions in a chat | The [Claude Skill](/agent-skill)'s `/vault-research` command. |
+
+## What an agent can do with your vault
+
+Every agent surface speaks to the same HTTP API. Capabilities they unlock:
+
+| Operation | Endpoint | Use it for |
+| --- | --- | --- |
+| **Search** | `POST /v1/docs/search/hybrid` | "What do I have on X?" — primary research move |
+| **Read a specific doc** | `GET /v1/docs/{id}` | "Pull the full body so I can quote from it" |
+| **Find related** | `GET /v1/docs/{id}/related` | "What else have I saved like this one?" — neighborhood expansion |
+| **Capture a new URL** | `POST /capture` | "Add this to my vault so I can find it later" |
+| **List recent** | `GET /v1/docs?limit=N&since=...` | "What've I captured this week?" |
+
+The agent surfaces are just well-shaped wrappers around these calls + a system prompt that teaches the model citation discipline and the "if you don't know, say [uncertain]" rule.
+
+## What an agent *won't* do (today)
+
+- **No automatic web fallback.** If the vault doesn't have the answer, the agent surfaces are configured to say `[uncertain]` and stop — not to silently fetch from Google. This is the headline guarantee for researcher-mode usage (embargoed work, due diligence, anything where source provenance matters).
+- **No streaming responses through the CLI.** The vault's `/chat` endpoint streams via SSE; the CLI doesn't expose it. Build a custom client if you need streaming.
+- **No automatic capture from agent output.** If the agent decides "the user would want me to capture this URL," it has to call `amperstand capture` explicitly. We don't infer.
+
+## Citation pattern
+
+Every agent surface cites docs as `[doc_id]` markers (the 26-char ULID). These are **internal** — they only work on your server. For published work (newsletters, papers, blog posts), convert them into real footnotes using the doc's `source:` frontmatter field. See [Citing vault docs in a public piece](/agent-prompt#citing-vault-docs-in-a-public-piece) for the conversion pattern and pseudocode.
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Shell-out: the simplest path" icon="terminal" href="/agent-shell">
+    `amperstand capture` from any agent that runs commands.
+  </Card>
+  <Card title="The deep-research skill" icon="sparkles" href="/agent-skill">
+    Multi-phase research workflow, fully pasted inline. No symlinks.
+  </Card>
+  <Card title="Drop-in system prompts" icon="message" href="/agent-prompt">
+    For Cursor, Custom GPT, n8n, and anywhere else.
+  </Card>
+  <Card title="HTTP API directly" icon="code" href="/api-reference/overview">
+    Full reference for custom-coded agents.
+  </Card>
+</CardGroup>

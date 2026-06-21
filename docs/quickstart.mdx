@@ -1,12 +1,15 @@
 ---
-title: Set up a server
-description: "Run an Amperstand vault server on a fresh Ubuntu droplet in under 10 minutes."
+title: "Set up a server: express (you have a droplet)"
+description: "10-minute setup for operators who already have an Ubuntu host and know SSH. For first-timers, use the step-by-step guide instead."
 ---
 
-This page sets up the server that stores your vault and exposes the HTTP API. Once it's running, install [the CLI](/cli-install) on your laptop to talk to it.
+This is the **express path**: clone the repo on an Ubuntu host you already have, run `bootstrap.sh`, you're done in ~10 minutes. The script installs Python, Caddy, ufw, systemd units, generates the API key, the lot.
 
 <Info>
-**Never deployed a server before?** Start with the [step-by-step install guide](/server-walkthrough) — it walks you from "I don't have a server" through "I just captured my first URL" with every click and command spelled out. About 30 min for a first-timer. This page is the express version for people who already have a droplet and know what `ssh root@…` does.
+**Pick the right install path for you:**
+- **First server ever?** → [Step-by-step install](/server-walkthrough) (30 min, walks you through DigitalOcean signup, SSH keys, every click)
+- **Have an Ubuntu host + SSH?** → keep reading
+- **Homelab user, prefer containers?** → [Docker Compose install](/server-install-docker)
 </Info>
 
 ## What this server depends on (read first)

@@ -47,19 +47,33 @@ All extraction runs **on the server**. Clients just hand over a URL (or HTML, or
 - **Data sovereignty.** The vault is plain markdown files on a server you own. The tool can disappear; the files don't.
 - **Stable surface.** The HTTP API is the contract. Build any client in any language. Your own agents query the same endpoints the bot does.
 
-## Where to go next
+## Set up your server — pick a path
+
+<CardGroup cols={3}>
+  <Card title="First server ever" icon="hand-holding-heart" href="/server-walkthrough">
+    30-min hand-held walkthrough. DigitalOcean signup, SSH keys, dashboard clicks, bootstrap. No prior server experience needed.
+  </Card>
+  <Card title="Have an Ubuntu host" icon="rocket" href="/quickstart">
+    10-min express setup. You have a droplet and know SSH. Clone the repo, run `bootstrap.sh`, done.
+  </Card>
+  <Card title="Prefer Docker" icon="docker" href="/server-install-docker">
+    `docker compose up -d`. Homelab-friendly, drops into your existing compose stack.
+  </Card>
+</CardGroup>
+
+Once your server is up:
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Set up the server, connect the CLI, capture your first URL.
+  <Card title="Install the CLI" icon="terminal" href="/cli-install">
+    `pip install amperstand`, point it at your server.
   </Card>
-  <Card title="Concepts" icon="book" href="/concepts">
-    Vault, capture surfaces, feed registry, search modes, job queue.
+  <Card title="Use the CLI (start here)" icon="play" href="/cli-quickstart">
+    The six things to know how to do. Capture, search, subscribe to a feed, read a doc back.
   </Card>
-  <Card title="CLI reference" icon="terminal" href="/cli-reference">
-    Every `amperstand` command in one page.
+  <Card title="Plug it into an AI agent" icon="robot" href="/agents-overview">
+    Make your vault the corpus your agent queries. Skills, system prompts, shell-out — three patterns.
   </Card>
-  <Card title="HTTP API" icon="code" href="/api-reference/overview">
-    REST endpoints for capture, vault, search, feeds.
+  <Card title="Build a custom client" icon="code" href="/examples/build-your-own">
+    The HTTP API is the contract. Any language, any tool.
   </Card>
 </CardGroup>
