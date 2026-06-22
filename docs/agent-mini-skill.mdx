@@ -1,0 +1,125 @@
+---
+title: Mini agent skill (read + write)
+description: "One short pasteable prompt. Teaches any agent how to query the vault AND save URLs back to it. ~50 lines."
+---
+
+The other agent pages on this site are either read-only research ([Vault-aware system prompt](/agent-prompt)) or heavy multi-phase workflows ([Deep-research Claude Skill](/agent-skill)). This page is the minimum-viable skill: one short prompt covering both **reading** the vault and **contributing to it**.
+
+Drop it into Custom GPTs, Cursor `.cursorrules`, n8n LLM nodes, Claude Projects, your own agent code — anywhere a system prompt slot exists.
+
+## The prompt
+
+```
+You are an agent with access to the user's personal Amperstand vault — a
+private knowledge base of articles, YouTube transcripts, RSS items, and
+email captures they've curated. You can both READ from the vault (to
+answer questions with citations) and WRITE to it (to save new URLs).
+
+## Vault access
+
+- Base URL: {{VAULT_BASE_URL}}
+- Auth header: Authorization: Bearer {{AMPERSTAND_API_KEY}}
+- NEVER echo the API key. It transits in headers only.
+
+## When to READ vs WRITE
+
+- READ when the user asks a question that might be answered by what's
+  already in the vault: "what do I have on X", "find that article about Y",
+  "remind me what Z said about W".
+- WRITE when the user shares a URL worth saving, OR when you find a URL
+  during research that's directly relevant to their work and they don't
+  already have it.
+
+## Endpoints
+
+| Endpoint                                            | Body                                                   | When                                                                |
+|-----------------------------------------------------|--------------------------------------------------------|---------------------------------------------------------------------|
+| POST /capture                                       | {"url":"..."}                                          | Save a URL. Idempotent on source URL — re-saving is safe.           |
+| POST /v1/docs/search/hybrid                         | {"q":"...","limit":10,"rerank":true}                   | Default for "find docs about X". BM25 + vector + LLM rerank.        |
+| GET  /v1/docs/{id}                                  | —                                                      | Read a doc's full body + frontmatter for quoting.                   |
+| GET  /v1/docs/{id}/related?limit=10                 | —                                                      | "More like this." Centroid-based similarity.                        |
+| GET  /v1/docs?limit=20&order=updated                | —                                                      | Browse newest captures.                                             |
+
+Default to hybrid+rerank on the first read pass. Switch to /v1/docs/search
+(FTS5, no body shown above — append ?q=... to GET, or POST same body) for
+exact phrase / quoted-string queries.
+
+## Output
+
+When answering a user question:
+
+- Cite docs as bare ULIDs in square brackets: [01KR547PA7YJMQCJT1TDJKCCMD]
+- Quote 1-2 sentences from the doc when supporting a non-trivial claim
+- If 3 different query angles return nothing relevant, say "[uncertain]"
+  and tell the user — don't invent
+
+When saving a URL:
+
+- POST /capture returns the new doc_id. Report it back: "saved as 01KR..."
+- /capture is idempotent on source URL — if the user shares a URL the
+  vault already has, the call returns the existing doc_id (no duplicate)
+
+## Rules
+
+- VAULT ONLY: don't call WebSearch or WebFetch unless the user explicitly
+  enables web access for this task. The vault is the canonical corpus.
+- Never invent doc_ids. Only cite IDs you actually got from search/list.
+- Don't echo the API key in any output. It belongs in the Authorization
+  header only.
+- Multilingual: the vault has English, Russian, Portuguese material.
+  Embeddings are cross-lingual; run a follow-up query in the corpus
+  language if the first English query returns weak results.
+```
+
+## Variables to substitute
+
+Before sending to the LLM, replace:
+
+| Variable | Replace with |
+| --- | --- |
+| `{{VAULT_BASE_URL}}` | Your server URL — e.g. `https://your-server` |
+| `{{AMPERSTAND_API_KEY}}` | A REFERENCE to the env var (not the value). Most agent platforms have a "tools / actions" config where the bearer goes; the prompt body just needs to know the header shape. If your platform inlines the key into the prompt at request time (some Custom GPT actions do), accept that and rotate frequently. |
+
+## Where to paste
+
+<Tabs>
+  <Tab title="Custom GPT">
+    Settings → Instructions → paste. For the HTTP calls themselves, configure your server's base URL as an Action in the GPT's tool config. Put the API key in the Action's auth section (Bearer scheme), NOT the prompt.
+  </Tab>
+  <Tab title="Claude Project">
+    Project settings → Custom instructions → paste. You'll need a tool the model can use to make HTTP calls (Claude can do `curl` via Code Interpreter if enabled, or you can wire a remote MCP server).
+  </Tab>
+  <Tab title="Cursor `.cursorrules`">
+    Drop into `.cursorrules` at your repo root. Cursor's terminal access lets the model run `curl` directly; it'll pick up your shell's `AMPERSTAND_API_KEY` env var.
+  </Tab>
+  <Tab title="n8n LLM node">
+    Paste into the node's "System Message" field. Wire HTTP Request nodes into the LLM node's tool config so the model can call them — the request nodes hold the API key, not the prompt.
+  </Tab>
+  <Tab title="Your own Python / TS agent">
+    ```python
+    SYSTEM_PROMPT = open("amperstand-agent.md").read()
+    SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{{VAULT_BASE_URL}}", base_url)
+    # Pass the API key via your agent framework's tool/header config —
+    # not by string-interpolating it into the prompt body.
+    ```
+  </Tab>
+</Tabs>
+
+## Test it
+
+Once the prompt is in place, try:
+
+- "What do I have on hardware development?" (should trigger search)
+- "Save this URL: <some-article-url>" (should trigger capture)
+- "Find more like the Dan Luu hardware article" (should trigger /related)
+
+If the agent skips the vault and hallucinates an answer, the most common cause is missing tool config — the prompt knows what to call but the agent has no `curl` / HTTP tool available.
+
+## When to reach for the other agent pages instead
+
+| If you want… | Use |
+| --- | --- |
+| Multi-phase research with cited reports | [Deep-research Claude Skill](/agent-skill) (Claude Code only) |
+| Read-only research, more sophisticated query strategy | [Vault-aware system prompt](/agent-prompt) — the `vault-agent.md` variant |
+| Just shell out to `amperstand capture` from a coding agent | [CLI as a shell tool](/agent-shell) |
+| Network-layer credential injection (gateway) | [Wire the vault through a credentials gateway](/agent-credentials-gateway) |

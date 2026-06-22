@@ -9,15 +9,18 @@ This page is the front door. Three integration patterns, increasing in sophistic
 
 ## Pick a pattern
 
-<CardGroup cols={3}>
-  <Card title="Shell-out" icon="terminal" href="/agent-shell">
-    Your agent runs `amperstand capture <url>` as a shell command. Works in Claude Code, Cursor, n8n, custom Python agents. **15 minutes to wire up.**
+<CardGroup cols={2}>
+  <Card title="Mini skill (read + write)" icon="bolt" href="/agent-mini-skill">
+    One short pasteable prompt covering BOTH reading and contributing. Default starting point — works in any agent context. **~50 lines, 5 minutes.**
   </Card>
-  <Card title="Claude Skill" icon="sparkles" href="/agent-skill">
+  <Card title="Shell-out" icon="terminal" href="/agent-shell">
+    Your agent runs `amperstand capture <url>` as a shell command. Best when your agent already has a bash/exec tool. **15 minutes to wire up.**
+  </Card>
+  <Card title="Deep-research Claude Skill" icon="sparkles" href="/agent-skill">
     Install the `vault-research` skill. End-to-end multi-phase research workflow: scope → refine → research → cited report. **For Claude Code users specifically.**
   </Card>
-  <Card title="System prompt" icon="message" href="/agent-prompt">
-    Drop a paste-ready system prompt into Custom GPTs, Claude Projects, Cursor `.cursorrules`, n8n LLM nodes. Cites doc IDs, refuses to invent. **Framework-agnostic.**
+  <Card title="System prompt (read-only)" icon="message" href="/agent-prompt">
+    More sophisticated read-only prompts (research agent, RAG chat, rerank judge). Use when the mini skill isn't enough or you want specialized variants.
   </Card>
 </CardGroup>
 
@@ -25,12 +28,15 @@ This page is the front door. Three integration patterns, increasing in sophistic
 
 | If your stack is… | Use… |
 | --- | --- |
-| Claude Code | The [Claude Skill](/agent-skill) for research workflows, [shell-out](/agent-shell) for ad-hoc capture / search. Both work; the skill is more guided. |
-| Cursor | The [system prompt](/agent-prompt) (`.cursorrules`) for read-side queries. Add [shell-out](/agent-shell) commands to your rules file for `capture`. |
-| Custom GPT / Claude Project | The [system prompt](/agent-prompt). Wire the HTTP API as a configured Action; the prompt teaches the model how to use it. |
-| n8n / Make / Zapier | The [system prompt](/agent-prompt) in your LLM node, HTTP Request nodes for the actual calls. |
-| Your own Python / TS agent code | The HTTP API directly — see [Build your own client](/examples/build-your-own). The system prompt is still useful as a guide for what to teach your model about. |
-| Just want to ask questions in a chat | The [Claude Skill](/agent-skill)'s `/vault-research` command. |
+| Anything, starting fresh | The [mini skill](/agent-mini-skill). Read + write in one prompt. Default. |
+| Claude Code, ad-hoc | [Shell-out](/agent-shell) — your agent runs `amperstand` as a shell command. |
+| Claude Code, multi-phase research | The [Claude Skill](/agent-skill). Guided scope → research → cited report. |
+| Cursor | The [mini skill](/agent-mini-skill) in `.cursorrules` (read + write). |
+| Custom GPT / Claude Project | The [mini skill](/agent-mini-skill). Wire the HTTP API as a configured Action. |
+| n8n / Make / Zapier | The [mini skill](/agent-mini-skill) in your LLM node + HTTP Request nodes for calls. |
+| Your own Python / TS agent code | The HTTP API directly — see [Build your own client](/examples/build-your-own). |
+| Specialized read-only patterns (research-grade query strategy, RAG chat, search rerank) | The longer [system prompts](/agent-prompt). |
+| Network-layer credential injection (BONO etc.) | [Credentials gateway](/agent-credentials-gateway). |
 
 ## What an agent can do with your vault
 

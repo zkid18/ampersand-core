@@ -41,6 +41,7 @@
             "group": "Build with AI agents",
             "pages": [
               "agents-overview",
+              "agent-mini-skill",
               "agent-shell",
               "agent-skill",
               "agent-prompt",
