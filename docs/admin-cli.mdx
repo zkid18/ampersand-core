@@ -1,11 +1,24 @@
 ---
 title: Admin CLI (`amperstand-admin`)
-description: "Server-side admin command reference. Runs on the box, bypasses HTTP, talks to the vault directly."
+description: "Server-side admin commands. Runs on the box, bypasses HTTP, doesn't need an API key — protected by SSH access instead."
 ---
 
-`amperstand-admin` is a separate console script that ships with `amperstand-core`. It runs **on the server**, not your laptop, and operates on the vault filesystem + SQLite directly — bypassing the HTTP API and authentication.
+`amperstand-admin` is **not the laptop CLI**. Two programs ship with the project:
 
-Use it for operations the HTTP API doesn't expose: rotating the API key, rebuilding indexes from disk, backing up, verifying integrity, retraining the newsletter classifier.
+| Program | Where it runs | What it needs to authenticate | What it does |
+| --- | --- | --- | --- |
+| **`amperstand`** | Your laptop | API key (sent over HTTP) | Capture URLs, manage feeds, query the vault |
+| **`amperstand-admin`** | The server, via SSH | SSH access + sudo (filesystem perms) | Rotate the API key, rebuild indexes, backup, integrity check |
+
+The reason the admin CLI exists is to do things the HTTP API can't safely expose:
+
+- **Rotate or create the API key itself** — chicken-and-egg if it went over HTTP
+- **Rebuild the SQLite index from markdown** after a restore
+- **Backup the vault as a tar archive**
+- **Verify on-disk integrity** (recompute `content_hash` from every file)
+- **Retrain the newsletter classifier**
+
+The credential that protects `amperstand-admin` is your SSH key to the server — not the API key. That's deliberate: if you've lost or leaked the API key, you can still SSH in and mint a new one. (If you've also lost SSH access to the server, the vault is unrecoverable as the operator — the right model is to back up your SSH key the way you'd back up any other admin credential.)
 
 ## Invocation
 
@@ -29,6 +42,8 @@ Most commands take an optional `--env-file` flag (defaults to `/etc/amperstand/e
 ### `rotate-key` — create or rotate the API key
 
 Mints a fresh 64-char hex `AMPERSTAND_API_KEY` and writes it to the env file via a surgical line-replace. Preserves comments, other secrets, file ownership (`root:amperstand`), and mode (`0640`).
+
+**No API key needed to run this** — the command operates on the env file directly via filesystem perms. What you need is SSH access to the server + sudo. That's the whole point: rotation can't depend on the credential being rotated.
 
 ```bash
 amperstand-admin rotate-key --env-file /etc/amperstand/env
