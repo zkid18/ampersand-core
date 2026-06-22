@@ -110,7 +110,7 @@ Before sending to the LLM, replace:
 Once the prompt is in place, try:
 
 - "What do I have on hardware development?" (should trigger search)
-- "Save this URL: <some-article-url>" (should trigger capture)
+- "Save this URL: `<some-article-url>`" (should trigger capture)
 - "Find more like the Dan Luu hardware article" (should trigger /related)
 
 If the agent skips the vault and hallucinates an answer, the most common cause is missing tool config — the prompt knows what to call but the agent has no `curl` / HTTP tool available.
