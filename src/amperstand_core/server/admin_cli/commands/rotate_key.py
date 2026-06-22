@@ -94,23 +94,34 @@ def _atomic_write_preserve_meta(target: Path, data: bytes) -> None:
     existing file's perms (not the temp file's). This keeps the
     `0640 root:amperstand` invariant that bootstrap.sh establishes and that
     the systemd `EnvironmentFile=/etc/amperstand/env` depends on.
+
+    Cleanup guarantee: if ANY step fails (write, fsync, chmod, chown, replace),
+    the temp file containing the new secret is unlinked before the exception
+    propagates. NamedTemporaryFile(delete=False) means we own the cleanup
+    contract.
     """
     parent = target.parent
 
     # Snapshot original stat — needed to restore mode + owner + group.
     orig_stat = target.stat()
 
-    with NamedTemporaryFile(
-        dir=parent, prefix=".tmp-", suffix=target.suffix, delete=False
-    ) as tmp:
-        tmp.write(data)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_name = Path(tmp.name)
-
+    tmp_name: Path | None = None
     try:
-        # Preserve perms BEFORE replace so there's no window where the file
-        # has temp-mode (0o600 caller). copystat handles mode/atime/mtime.
+        with NamedTemporaryFile(
+            dir=parent, prefix=".tmp-", suffix=target.suffix, delete=False
+        ) as tmp:
+            tmp_name = Path(tmp.name)
+            # Tighten perms BEFORE writing the secret so even an instantaneous
+            # ls during write can't catch a wider mode. NamedTemporaryFile
+            # defaults to 0o600 already on POSIX, but be explicit.
+            os.chmod(tmp_name, 0o600)
+            tmp.write(data)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+
+        # Preserve perms BEFORE replace. copystat handles mode/atime/mtime
+        # (may widen mode back to 0o640 to match the target — fine because
+        # the file's group is amperstand and the directory is 0o750).
         shutil.copystat(target, tmp_name)
         try:
             os.chown(tmp_name, orig_stat.st_uid, orig_stat.st_gid)
@@ -124,11 +135,17 @@ def _atomic_write_preserve_meta(target: Path, data: bytes) -> None:
                 err=True,
             )
         os.replace(tmp_name, target)
-    except Exception:
-        # Clean up the temp file on any failure to avoid leaving the new
-        # secret on disk under a guessable name.
-        try:
-            tmp_name.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+        tmp_name = None  # transferred ownership; nothing to clean up
+    finally:
+        # Best-effort cleanup of the temp file on ANY failure path. If we
+        # succeeded above, tmp_name was set to None so this is a no-op.
+        if tmp_name is not None:
+            try:
+                tmp_name.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # If we can't even unlink, the secret persists on disk under
+                # `.tmp-XXXX` until manual cleanup. Loud-fail rather than
+                # silent-fail: re-raise the original exception via finally.
+                pass

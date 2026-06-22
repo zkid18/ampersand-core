@@ -537,11 +537,29 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    # Rotation is serialized by a single lock so two concurrent /admin/rotate-key
+    # calls can't race the disk vs in-memory write (which would let the caller
+    # who won the response disagree with the caller whose key ended up on disk
+    # — silent lockout after the next restart). Also enforces a minimum interval
+    # between rotations to defang the tight-loop abuse case where a leaked key
+    # invalidates every newly-issued key faster than the operator can paste one.
+    _rotate_lock = __import__("threading").Lock()
+    _rotate_state: dict = {"last_rotation_ts": 0.0}
+    _MIN_ROTATE_INTERVAL_S = float(os.environ.get("AMPERSTAND_ROTATE_MIN_INTERVAL_S", "10"))
+
+    # Snapshot the env file path at app startup, NOT per-request. Otherwise an
+    # operator who has AMPERSTAND_ENV_FILE in the process env can have it
+    # influenced later (defense in depth — and it forecloses an
+    # "arbitrary-file-overwrite via env-var" confused-deputy).
+    _frozen_env_file = Path(os.environ.get("AMPERSTAND_ENV_FILE", "/etc/amperstand/env"))
+
+    from fastapi import Request as _Request
+
     @app.post(
         "/admin/rotate-key",
         dependencies=[Depends(require_api_key)],
     )
-    def admin_rotate_key() -> dict:
+    def admin_rotate_key(request: _Request) -> dict:
         """Mint a new AMPERSTAND_API_KEY, write it to the env file, update the
         running process's in-memory key so the new value is accepted immediately.
 
@@ -554,57 +572,153 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         vault-watcher, feed-sync) still hold the old key in their process
         memory until their own restart — the response payload tells the caller.
         """
+        import hashlib as _hashlib
         import secrets as _secrets
+        import time as _time
         from amperstand_core.server.admin_cli.commands.rotate_key import (
             _atomic_write_preserve_meta,
             _KEY_LINE_RE,
         )
 
-        env_file = Path(os.environ.get("AMPERSTAND_ENV_FILE", "/etc/amperstand/env"))
-        if not env_file.exists():
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"env file {env_file} not found on the server. Rotate via SSH: "
-                    f"`amperstand-admin rotate-key --env-file <path>`."
-                ),
-            )
-
+        # ── 1. Multi-worker guard. The in-memory env write only updates THIS
+        #    worker process. With uvicorn --workers >1, sibling workers serve
+        #    auth against stale env values → chaos. Refuse rather than silently
+        #    create the mismatch.
         try:
-            original = env_file.read_text(encoding="utf-8")
-        except PermissionError:
+            worker_count = int(os.environ.get("AMPERSTAND_UVICORN_WORKERS", "1"))
+        except ValueError:
+            worker_count = 1
+        if worker_count > 1:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "server process cannot read its own env file. Rotate via SSH: "
-                    "`amperstand-admin rotate-key`."
+                    "rotate-key is not multi-worker safe; this server is configured "
+                    f"with {worker_count} uvicorn workers. Use `amperstand-admin "
+                    "rotate-key --env-file /etc/amperstand/env` via SSH instead."
                 ),
             )
 
-        if not _KEY_LINE_RE.search(original):
-            raise HTTPException(
-                status_code=500,
-                detail="no `AMPERSTAND_API_KEY=` line in env file (server is misconfigured)",
+        # ── 2. HTTPS guard. Rotation returns the new key in the response body;
+        #    over HTTP a MITM gets old key (request header) AND new key
+        #    (response body) in one round-trip. Caddy sets X-Forwarded-Proto.
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").lower()
+        if forwarded_proto != "https":
+            if os.environ.get("AMPERSTAND_ALLOW_HTTP_ROTATE") != "1":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "rotate-key requires HTTPS (X-Forwarded-Proto: https). "
+                        "Returning a fresh secret over plaintext lets a MITM "
+                        "capture both old and new key in one round-trip. Configure "
+                        "Caddy with Caddyfile.tls, or set "
+                        "AMPERSTAND_ALLOW_HTTP_ROTATE=1 on the server for dev "
+                        "(NOT production)."
+                    ),
+                )
+
+        # ── 3. Origin allowlist for /admin/*. If the request has an Origin
+        #    header (i.e. it's from a browser), require the origin to be in the
+        #    server's allowlist. CLI / curl / bot requests have no Origin —
+        #    those pass through. Closes the CORS+XSS-driven rotation vector.
+        origin = request.headers.get("Origin", "").strip()
+        if origin:
+            allowlist = [
+                o.strip()
+                for o in os.environ.get("AMPERSTAND_ADMIN_ORIGINS", "").split(",")
+                if o.strip()
+            ]
+            if origin not in allowlist:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"origin {origin!r} not in AMPERSTAND_ADMIN_ORIGINS "
+                        "allowlist for /admin endpoints"
+                    ),
+                )
+
+        # ── 4. Serialize + rate limit. Outside the lock first because the
+        #    rate-limit check should be cheap to fail.
+        with _rotate_lock:
+            now = _time.monotonic()
+            since_last = now - _rotate_state["last_rotation_ts"]
+            if since_last < _MIN_ROTATE_INTERVAL_S:
+                wait = _MIN_ROTATE_INTERVAL_S - since_last
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"rate limit: rotated {since_last:.1f}s ago; minimum "
+                        f"interval is {_MIN_ROTATE_INTERVAL_S}s. Try again in "
+                        f"{wait:.1f}s."
+                    ),
+                )
+
+            env_file = _frozen_env_file
+            if not env_file.exists():
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"env file not found on the server. Rotate via SSH: "
+                        f"`amperstand-admin rotate-key --env-file <path>`."
+                    ),
+                )
+
+            try:
+                original = env_file.read_text(encoding="utf-8")
+            except PermissionError:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "server process cannot read its own env file. Rotate via "
+                        "SSH: `amperstand-admin rotate-key`."
+                    ),
+                )
+
+            if not _KEY_LINE_RE.search(original):
+                raise HTTPException(
+                    status_code=500,
+                    detail="no `AMPERSTAND_API_KEY=` line in env file (misconfigured)",
+                )
+
+            new_key = _secrets.token_hex(32)
+            rewritten = _KEY_LINE_RE.sub(
+                f"AMPERSTAND_API_KEY={new_key}", original, count=1
             )
 
-        new_key = _secrets.token_hex(32)
-        rewritten = _KEY_LINE_RE.sub(f"AMPERSTAND_API_KEY={new_key}", original, count=1)
+            # Broaden exception catch: any OSError (ENOSPC, EROFS, EIO) returns
+            # a clean 503 instead of letting FastAPI surface a traceback that
+            # may have `data` (the env-file bytes incl. the new key) in locals
+            # if debug logging is on. PermissionError is an OSError subclass.
+            try:
+                _atomic_write_preserve_meta(env_file, rewritten.encode("utf-8"))
+            except OSError as e:
+                # Type name only, not str(e) — paths in the message leak the
+                # frozen env file location to an unauthenticated attacker doing
+                # error fingerprinting (well, authenticated here, but defence
+                # in depth).
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"server failed to write env file ({type(e).__name__}). "
+                        "Rotate via SSH instead."
+                    ),
+                )
 
-        try:
-            _atomic_write_preserve_meta(env_file, rewritten.encode("utf-8"))
-        except PermissionError as e:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"server process can't write the env file ({e}). Likely a "
-                    f"deployment-perms issue. Rotate via SSH instead."
-                ),
-            )
+            # Update in-memory so this worker accepts the new key on its very
+            # next request. Sibling workers (if any) wouldn't see this, but
+            # we already refused worker_count > 1 above.
+            os.environ["AMPERSTAND_API_KEY"] = new_key
+            _rotate_state["last_rotation_ts"] = _time.monotonic()
 
-        # Update in-memory so the running process accepts the new key for the
-        # very next request (and rejects the old). Other services holding the
-        # old key in THEIR memory keep using it until their own restart.
-        os.environ["AMPERSTAND_API_KEY"] = new_key
+        # ── 5. Audit log. Logged AFTER the rotation succeeds; OUTSIDE the lock
+        #    so log I/O doesn't hold up concurrent rate-limit checks. Fingerprint
+        #    only — don't log the key itself.
+        client_ip = request.client.host if request.client else "unknown"
+        xff = request.headers.get("X-Forwarded-For", "")
+        new_key_fp = _hashlib.sha256(new_key.encode()).hexdigest()[:12]
+        log.warning(
+            "admin/rotate-key invoked: client_ip=%s xff=%s new_key_fp=%s",
+            client_ip, xff, new_key_fp,
+        )
 
         return {
             "new_api_key": new_key,

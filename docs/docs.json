@@ -43,7 +43,8 @@
               "agents-overview",
               "agent-shell",
               "agent-skill",
-              "agent-prompt"
+              "agent-prompt",
+              "agent-credentials-gateway"
             ]
           },
           {
