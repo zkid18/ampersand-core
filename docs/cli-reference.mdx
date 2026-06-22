@@ -5,6 +5,35 @@ description: "Every `amperstand` command, grouped by surface."
 
 The `amperstand` CLI is an HTTP client for an `amperstand-core` server. Install with `pip install amperstand`. It does no extraction itself — every command translates to a REST call against the server you've configured.
 
+## See every command at once
+
+```bash
+amperstand commands
+```
+
+```
+amperstand
+├── capture       — Send a URL to the server for capture.
+├── commands      — Print every command in the CLI, in one flat tree.
+├── config        — View and update local CLI configuration.
+│   ├── set       — Set a configuration value.
+│   └── show      — Print local CLI configuration as JSON.
+├── feed          — Manage RSS/Atom feed subscriptions on the server.
+│   ├── add       — Subscribe the server to an RSS/Atom feed.
+│   ├── list      — List subscribed feeds on the server.
+│   ├── remove    — Unsubscribe by feed ID or URL.
+│   └── sync      — Trigger a server-side sync.
+├── rotate-key    — Mint a new API key + update your local key file.
+└── vault         — Backend config + health check.
+    ├── backend
+    │   ├── clear        — Forget the configured server.
+    │   ├── set-server   — Point the CLI at an amperstand-core server.
+    │   └── show         — Show the configured server URL + API key mode.
+    └── status           — Show server health + total doc count.
+```
+
+`amperstand --help` only shows the top-level entries (typer is hierarchical by default). `commands` walks the whole tree — useful for grep, useful for discovery.
+
 ## Backend setup
 
 Before any other command works, point the CLI at a server:
