@@ -1,0 +1,130 @@
+---
+title: Admin CLI (`amperstand-admin`)
+description: "Server-side admin command reference. Runs on the box, bypasses HTTP, talks to the vault directly."
+---
+
+`amperstand-admin` is a separate console script that ships with `amperstand-core`. It runs **on the server**, not your laptop, and operates on the vault filesystem + SQLite directly — bypassing the HTTP API and authentication.
+
+Use it for operations the HTTP API doesn't expose: rotating the API key, rebuilding indexes from disk, backing up, verifying integrity, retraining the newsletter classifier.
+
+## Invocation
+
+Always run as the service user so file ownership stays correct:
+
+```bash
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin <command> [flags]
+```
+
+Or activate the venv first:
+
+```bash
+source /opt/amperstand/venv/bin/activate
+sudo -u amperstand amperstand-admin <command> [flags]
+```
+
+Most commands take an optional `--env-file` flag (defaults to `/etc/amperstand/env` if present).
+
+## Commands
+
+### `rotate-key` — create or rotate the API key
+
+Mints a fresh 64-char hex `AMPERSTAND_API_KEY` and writes it to the env file via a surgical line-replace. Preserves comments, other secrets, file ownership (`root:amperstand`), and mode (`0640`).
+
+```bash
+amperstand-admin rotate-key --env-file /etc/amperstand/env
+# Prints the new key once; copy it now.
+
+# Dry-run (no writes):
+amperstand-admin rotate-key --env-file /etc/amperstand/env --dry-run
+```
+
+After running, restart the services that read the env file:
+
+```bash
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service amperstand-tg-bot
+```
+
+See [Operate in production → Create or rotate the API key](/deployment#create-or-rotate-the-api-key) for the full rotation runbook (clients, drain window, leak response).
+
+### `stats` — vault size + health
+
+```bash
+amperstand-admin stats
+```
+
+Doc count, oldest/newest, disk free, API key configured?, OpenAI key configured?. Read-only.
+
+### `reindex` — rebuild the metadata sidecar
+
+Walks every `.md` file in `$AMPERSTAND_DATA_DIR/`, parses frontmatter, repopulates `.store/meta.db` from scratch. Use after restoring from a backup (where you brought the markdown but not the SQLite) or to recover from a corrupted index.
+
+```bash
+amperstand-admin reindex
+# → reindexed 1,247 docs.
+```
+
+Scales linearly: ~1 min per 5,000 docs on a 1-vCPU droplet. The semantic vector index is **separate**; run `vec-rebuild` after if you use semantic search.
+
+### `vec-rebuild` — backfill embeddings
+
+```bash
+amperstand-admin vec-rebuild              # backfill only un-embedded docs
+amperstand-admin vec-rebuild --force      # drop and re-embed everything
+amperstand-admin vec-rebuild --dry-run    # show what would be embedded; no API calls
+```
+
+Requires `OPENAI_API_KEY` to be set in the env file. Costs ~$0.02 per 1,000 docs at `text-embedding-3-small` rates.
+
+### `integrity` — verify the vault is consistent
+
+Walks every doc, checks it parses, IDs match the `.store/by-id/` symlink tree, the `meta.db` row resolves.
+
+```bash
+amperstand-admin integrity              # fast — structural checks only
+amperstand-admin integrity --deep       # also recomputes content_hash per doc
+```
+
+Recommended after a restore, or as a weekly cron. Discrepancies in `--deep` mean either a hand-edit the watcher hasn't reindexed yet, or actual on-disk corruption.
+
+### `backup` — tar the vault data dir
+
+```bash
+amperstand-admin backup /tmp/vault-$(date +%Y%m%d).tar.gz
+amperstand-admin backup -                                # stream to stdout (pipe to S3 etc.)
+```
+
+The output tar is the vault markdown + `.store/` + `.classifier/`. The env file is **not** included — back it up separately and encrypted (see [Backups](/deployment#backups)).
+
+### `feeds-sync` — trigger a one-shot RSS sync
+
+Used internally by `amperstand-feed-sync.service`. Reads `AMPERSTAND_API_KEY` from the process env, POSTs to the local server's `/feeds/sync`. The key never goes on a command line.
+
+```bash
+amperstand-admin feeds-sync                                    # default base url 127.0.0.1:8765
+amperstand-admin feeds-sync --base-url http://127.0.0.1:9000   # if you've reconfigured the port
+```
+
+You'd typically only run this by hand if you want to kick a sync between the cron's scheduled runs.
+
+### `classifier` — retrain the newsletter filter
+
+```bash
+amperstand-admin classifier retrain          # train candidate, promote only if it doesn't regress
+amperstand-admin classifier retrain --force  # promote even if worse (overrides safety check)
+amperstand-admin classifier diff             # per-example holdout disagreements (current vs candidate)
+amperstand-admin classifier domains          # effective allowlist/blocklist (bundled + user override)
+```
+
+Used to evolve the IMAP newsletter classifier from your delete-feedback. See `src/amperstand_core/newsletter_classifier.py` for the model details. Read-only operations (`diff`, `domains`) are safe to run any time.
+
+## What this command set is NOT
+
+- **It's not the laptop CLI.** That's [`amperstand`](/cli-reference) — runs on your machine, speaks HTTP. `amperstand-admin` runs on the server and bypasses HTTP entirely.
+- **It's not the HTTP API.** Every command here operates on filesystem + SQLite directly. Useful for the operations the API doesn't expose (rotate the key, rebuild from disk, etc.).
+- **It's not a long-running daemon.** Each invocation is one-shot. The `feeds-sync` systemd timer fires `feeds-sync` on a schedule — that's the only scheduled use.
+
+## See also
+
+- [Operate in production](/deployment) — backups, restore runbook, hardening
+- [Authentication](/api-reference/authentication) — threat model + per-client key storage
+- [CLI reference](/cli-reference) — laptop-side `amperstand` CLI

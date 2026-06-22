@@ -79,12 +79,17 @@ Things you might expect but should reach for elsewhere:
 
 ## Server-side admin
 
-`amperstand-admin` ships with `amperstand-core` and runs **on the server**, not your laptop. It operates on the vault DB directly, bypassing the API. Useful for batch operations: reindexing, backfilling embeddings, pruning old jobs.
+`amperstand-admin` is a **separate** CLI that ships with `amperstand-core` and runs **on the server**, not your laptop. SSH to the server to use it. Operates on the vault filesystem + SQLite directly, bypassing HTTP.
+
+Common operations:
 
 ```bash
-amperstand-admin --help
-amperstand-admin vec_rebuild        # backfill embeddings for un-embedded docs
-amperstand-admin config show        # what the server sees
+amperstand-admin rotate-key --env-file /etc/amperstand/env   # create/rotate the API key
+amperstand-admin reindex                                     # rebuild meta.db from markdown
+amperstand-admin vec-rebuild                                 # backfill semantic embeddings
+amperstand-admin integrity --deep                            # verify vault is consistent
+amperstand-admin backup /tmp/vault-snapshot.tar.gz           # tar the data dir
+amperstand-admin stats                                       # vault size + health
 ```
 
-SSH to your server to run these.
+Full reference: [Admin CLI](/admin-cli).

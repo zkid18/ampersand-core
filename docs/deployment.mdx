@@ -188,21 +188,37 @@ sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin integrity --deep
 
 For a fresh droplet, `deploy/bootstrap.sh` does the whole thing — creates the user, installs systemd units, sets up Caddy, opens firewall ports. Read it before running it: it's ~150 lines and self-documenting.
 
-## Key rotation
+## Create or rotate the API key
+
+The server gets its initial API key from `bootstrap.sh` (which runs `openssl rand -hex 32` and writes to `/etc/amperstand/env`). To **create a new one** — either replacing a leaked key, or just refreshing on a schedule — use `amperstand-admin rotate-key`:
 
 ```bash
 # On the droplet — surgical, ownership-preserving:
 sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin rotate-key \
     --env-file /etc/amperstand/env
-sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service
-# Plus restart any client units that read /etc/amperstand/env (e.g. Telegram bot).
 
-# Verify:
+# Restart services that read /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service
+# Plus any client units (e.g. Telegram bot) that share the env file.
+
+# Verify
 sudo systemctl is-active amperstand-server
 ```
 
-Then update every external client. The CLI: re-export `AMPERSTAND_API_KEY` in your shell. The extension: paste new key into options page. The bot: picks up from `/etc/amperstand/env` on restart.
+The new 64-char hex key prints to stdout once — copy it now. The command does a **targeted edit on just the `AMPERSTAND_API_KEY=` line**: comments, other secrets (`OPENAI_API_KEY`, IMAP creds), and the `0640 root:amperstand` file ownership are all preserved. The key never appears on a command line, so it doesn't leak into shell history, the sudo audit log, or `/proc/<pid>/cmdline`.
 
-If a key has leaked (anywhere — log file, chat, paste buffer), rotate first, audit second. The `rotate-key` admin command does a targeted edit on just the `AMPERSTAND_API_KEY=` line: comments, other secrets, and the `0640 root:amperstand` perms are preserved. Avoid the older `sed -i` recipe — it leaked the new key into shell history, the sudo audit log, and `/proc/<pid>/cmdline`.
+**Then update each client:**
 
-Note: the server drains in-flight requests for up to ~25 seconds on restart. For a hot leak, follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up.
+- **CLI on your laptop**: edit `~/.amperstand-api-key` with the new value, then `source ~/.zshrc`
+- **Telegram bot**: already restarted above (reads the same env file), no further action
+- **Chrome extension**: paste the new key into the extension's options page on every browser running it
+
+**Multiple keys?** There's no per-client / per-scope / read-only key concept today — `AMPERSTAND_API_KEY` is a single master credential. See [Authentication](/api-reference/authentication#why-one-shared-key) for the workarounds (separate servers per trust domain, reverse-proxy auth).
+
+<Warning>
+**The server drains in-flight requests for up to ~25s** after `systemctl restart`. Requests holding the old key keep succeeding during that window. For a hot leak (you saw the key in someone else's terminal), follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up to cut the drain window to zero.
+
+For full threat model, secure storage on each client type, and what to do if the key has leaked, see [Authentication](/api-reference/authentication).
+</Warning>
+
+For all the other admin commands (reindex, vec-rebuild, backup, integrity, classifier), see [Admin CLI](/admin-cli).

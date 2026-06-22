@@ -57,6 +57,7 @@
             "group": "Operate in production",
             "pages": [
               "deployment",
+              "admin-cli",
               "configuration",
               "vault-sync-local"
             ]
