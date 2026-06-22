@@ -29,11 +29,12 @@
             ]
           },
           {
-            "group": "Use the CLI",
+            "group": "Command-line tools",
             "pages": [
               "cli-install",
               "cli-quickstart",
-              "cli-reference"
+              "cli-reference",
+              "admin-cli"
             ]
           },
           {
@@ -57,7 +58,6 @@
             "group": "Operate in production",
             "pages": [
               "deployment",
-              "admin-cli",
               "configuration",
               "vault-sync-local"
             ]
