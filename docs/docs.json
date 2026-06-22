@@ -58,6 +58,7 @@
             "group": "Operate in production",
             "pages": [
               "deployment",
+              "api-key",
               "configuration",
               "vault-sync-local"
             ]

@@ -537,6 +537,87 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    @app.post(
+        "/admin/rotate-key",
+        dependencies=[Depends(require_api_key)],
+    )
+    def admin_rotate_key() -> dict:
+        """Mint a new AMPERSTAND_API_KEY, write it to the env file, update the
+        running process's in-memory key so the new value is accepted immediately.
+
+        Gated by the EXISTING API key. Implication: anyone holding the current
+        key can rotate it (potentially locking you out if it leaks). Recovery
+        is SSH-only — `amperstand-admin rotate-key` on the box. Document that
+        trade-off in the CLI's `rotate-key` help text.
+
+        Other services that read /etc/amperstand/env at startup (Telegram bot,
+        vault-watcher, feed-sync) still hold the old key in their process
+        memory until their own restart — the response payload tells the caller.
+        """
+        import secrets as _secrets
+        from amperstand_core.server.admin_cli.commands.rotate_key import (
+            _atomic_write_preserve_meta,
+            _KEY_LINE_RE,
+        )
+
+        env_file = Path(os.environ.get("AMPERSTAND_ENV_FILE", "/etc/amperstand/env"))
+        if not env_file.exists():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"env file {env_file} not found on the server. Rotate via SSH: "
+                    f"`amperstand-admin rotate-key --env-file <path>`."
+                ),
+            )
+
+        try:
+            original = env_file.read_text(encoding="utf-8")
+        except PermissionError:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "server process cannot read its own env file. Rotate via SSH: "
+                    "`amperstand-admin rotate-key`."
+                ),
+            )
+
+        if not _KEY_LINE_RE.search(original):
+            raise HTTPException(
+                status_code=500,
+                detail="no `AMPERSTAND_API_KEY=` line in env file (server is misconfigured)",
+            )
+
+        new_key = _secrets.token_hex(32)
+        rewritten = _KEY_LINE_RE.sub(f"AMPERSTAND_API_KEY={new_key}", original, count=1)
+
+        try:
+            _atomic_write_preserve_meta(env_file, rewritten.encode("utf-8"))
+        except PermissionError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"server process can't write the env file ({e}). Likely a "
+                    f"deployment-perms issue. Rotate via SSH instead."
+                ),
+            )
+
+        # Update in-memory so the running process accepts the new key for the
+        # very next request (and rejects the old). Other services holding the
+        # old key in THEIR memory keep using it until their own restart.
+        os.environ["AMPERSTAND_API_KEY"] = new_key
+
+        return {
+            "new_api_key": new_key,
+            "warning": (
+                "Server is using the new key immediately. Other services that "
+                "read /etc/amperstand/env at startup (Telegram bot, vault-watcher, "
+                "feed-sync) still hold the OLD key in process memory until their "
+                "own restart — they will start getting 401 on requests. SSH in and "
+                "`sudo systemctl restart amperstand-tg-bot amperstand-vault-watcher "
+                "amperstand-feed-sync.service` to bring them current."
+            ),
+        }
+
     return app
 
 

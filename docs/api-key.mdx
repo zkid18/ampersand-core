@@ -1,0 +1,101 @@
+---
+title: Create or rotate the API key
+description: "Two paths: one HTTP call from your laptop (`amperstand rotate-key`), or SSH-based admin command (`amperstand-admin rotate-key`). Pick by threat model."
+---
+
+The `AMPERSTAND_API_KEY` is your server's master credential. Every client (laptop CLI, Telegram bot, browser extension, your own agent code) sends it as `Authorization: Bearer <key>` to prove they're allowed to talk to your vault.
+
+This page covers how to create a new one — either replacing a leaked key or just refreshing on a schedule.
+
+There are **two paths**, gated by two different credentials. Pick by what you have and what's safer for your situation.
+
+## Path A: from your laptop, in one command
+
+```bash
+amperstand rotate-key
+```
+
+That's it. The CLI POSTs to `/admin/rotate-key` on your server, the server mints a fresh 64-char hex key, writes it to `/etc/amperstand/env`, updates its in-memory key so the new value is accepted immediately, and returns the new key. The CLI then updates your local `~/.amperstand-api-key` file (mode 0600).
+
+After it finishes:
+
+```bash
+source ~/.zshrc                              # so new shells pick up the new value
+# SSH in to restart other client services that hold the old key in memory:
+ssh root@<your-server> sudo systemctl restart amperstand-tg-bot amperstand-vault-watcher amperstand-feed-sync.service
+# Then re-paste the new key into your Chrome extension's options page.
+```
+
+**Authenticated by**: the existing `AMPERSTAND_API_KEY`. The server's `POST /admin/rotate-key` endpoint requires the current API key as bearer.
+
+**Trade-off**: a leaked key can rotate itself. An attacker who exfiltrated your key can call this endpoint, mint a new key, and lock you out. Recovery is Path B (SSH). For most personal-use cases this is fine — the worst case is "rotate again via SSH." If you're worried about that specific attack pattern, use Path B exclusively.
+
+## Path B: from SSH on the server
+
+```bash
+ssh root@<your-server>
+sudo -u amperstand /opt/amperstand/venv/bin/amperstand-admin rotate-key \
+    --env-file /etc/amperstand/env
+sudo systemctl restart amperstand-server amperstand-vault-watcher amperstand-feed-sync.service amperstand-tg-bot
+sudo systemctl is-active amperstand-server
+```
+
+**Authenticated by**: SSH access to the server + sudo. The admin CLI operates on the env file directly via filesystem perms — it has no HTTP surface and doesn't accept or check the API key.
+
+**Use this when**: you've lost the existing API key and can't call Path A. Or when you're rotating *because* of a leak and don't want the attacker to be able to follow you through Path A. Or when the server's `POST /admin/rotate-key` endpoint is unavailable for whatever reason.
+
+## Which one should I default to?
+
+| Situation | Use |
+| --- | --- |
+| Routine rotation, you have the existing key | **Path A** (`amperstand rotate-key`) |
+| Lost the key | **Path B** (only option) |
+| Suspect the key is in someone else's hands | **Path B** (denies the attacker the same convenience) |
+| Server's `/admin/rotate-key` not accessible (network issue, server bug) | **Path B** |
+| Building automated rotation in CI / a cron | **Path A** if your CI already has the key; **Path B** if your CI has SSH but not the key |
+
+## What both paths do
+
+Both mint a fresh 64-char hex key via `openssl rand -hex 32` (Path B literally, Path A via `secrets.token_hex(32)` which is equivalent). Both do a **surgical line-replace** on `/etc/amperstand/env` — only the `AMPERSTAND_API_KEY=` line changes; comments, other secrets (`OPENAI_API_KEY`, `AMPERSTAND_PROXY_URL`, etc.), and the file's `0640 root:amperstand` ownership are preserved. Both atomically replace the file via `os.rename` so a crash mid-write can't leave you with a half-written env file.
+
+## What both paths do NOT do
+
+- **Neither restarts the Telegram bot / vault-watcher / feed-sync / extension automatically.** Those processes read the env file at startup and hold the key in memory. After rotation, they keep using the OLD key until restarted. Path A's response payload reminds you; Path B's stdout reminds you.
+
+- **Neither cuts the in-flight request drain.** uvicorn drains in-flight requests for up to ~25 seconds on `systemctl restart`. During that window, the OLD worker is still serving requests against the OLD key. For a hot leak, follow the restart with `sudo systemctl kill --signal=SIGKILL amperstand-server` once the new worker is up.
+
+## After rotation: per-client checklist
+
+Run this checklist after either path:
+
+| Client | What to do |
+| --- | --- |
+| **Laptop CLI** (yours) | Path A: already updated `~/.amperstand-api-key`. `source ~/.zshrc` for new shells. Path B: paste the new key into `~/.amperstand-api-key` manually, then `source ~/.zshrc`. |
+| **Other laptops** (if you have the CLI on multiple machines) | Path A doesn't auto-sync. Paste manually on each. |
+| **Telegram bot** | `sudo systemctl restart amperstand-tg-bot` on the server. It re-reads `/etc/amperstand/env`. |
+| **Chrome extension** | Paste the new key into the extension's options page on every browser running it. |
+| **Custom agents / scripts** | Whatever config mechanism they use; redeploy / restart as needed. |
+| **vault-watcher, feed-sync** | `sudo systemctl restart amperstand-vault-watcher amperstand-feed-sync.service` — they read the env file at startup. |
+
+## If a key has leaked
+
+Rotate first, audit second.
+
+1. **Rotate** via Path B (SSH) so the attacker can't also rotate
+2. Update every client (the checklist above)
+3. `sudo systemctl kill --signal=SIGKILL amperstand-server` to cut the drain window
+4. **Then** check `journalctl -u amperstand-server` for suspicious request patterns from unexpected IPs
+
+The cost of rotation is one minute. The cost of leaving a leaked key live is potentially your entire vault.
+
+Also scrub the old key from places it might linger:
+
+- `~/.bash_history` / `~/.zsh_history` on the machine where it leaked
+- Editor swap files (`/etc/amperstand/env.swp` if you used `nano` and crashed mid-edit)
+- Encrypted backups within retention (your old key is recoverable from backups until those backups age out — see [Backups](/deployment#backups))
+
+## Why is there no "multi-key" path?
+
+Today, one server = one API key. There's no per-client / per-scope / read-only / per-user key concept. See [Authentication → Why one shared key](/api-reference/authentication#why-one-shared-key-and-what-to-do-if-you-need-more) for the threat model + workarounds (separate servers per trust domain, reverse-proxy auth).
+
+Per-key scopes are on the roadmap; not built.

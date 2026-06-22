@@ -190,7 +190,11 @@ For a fresh droplet, `deploy/bootstrap.sh` does the whole thing — creates the 
 
 ## Create or rotate the API key
 
-The server gets its initial API key from `bootstrap.sh` (which runs `openssl rand -hex 32` and writes to `/etc/amperstand/env`). To **create a new one** — either replacing a leaked key, or just refreshing on a schedule — SSH into the server and run `amperstand-admin rotate-key`:
+There's a dedicated page for this: **[Create or rotate the API key](/api-key)** — covers both the laptop-side (`amperstand rotate-key`) and SSH-side (`amperstand-admin rotate-key`) paths, when to use each, and the post-rotation per-client checklist.
+
+The short version below covers the SSH path; for the one-command laptop flow, see the page above.
+
+To **create a new key from SSH** — either replacing a leaked key, or just refreshing on a schedule:
 
 <Note>
 **You don't need the existing API key to issue a new one.** `amperstand-admin` reads `/etc/amperstand/env` directly via filesystem perms — it bypasses the HTTP API entirely. The credential that gates rotation is **SSH access to the server** (plus sudo), not the API key itself. If you lost the current key, that's a recovery story, not a lockout.
