@@ -1,35 +1,80 @@
 ---
 title: API overview
-description: "Endpoints, conventions, and where to look first."
+description: "Endpoints, conventions, error shapes, where to look first."
 ---
 
 The Amperstand server is FastAPI under uvicorn. It speaks JSON, expects an API key in every request, and returns Pydantic-validated responses.
+
+<Tip>
+**New here?** Skip to the [Curl cookbook](/api-reference/curl-cookbook) for pasteable commands covering every common operation.
+</Tip>
 
 ## Base URL
 
 ```
 http://<your-host>:8765       # local
-https://<your-domain>          # production behind Caddy
+https://<your-domain>         # production behind Caddy
 ```
 
 ## Endpoint groups
 
-| Path prefix | Purpose | Reference |
+| Path | Purpose | Reference |
 | --- | --- | --- |
+| `/health` | Liveness probe (unauthenticated) | — |
+| `/auth/verify` | "Is my API key good?" — side-effect-free check | [Authentication](/api-reference/authentication#verify-your-key-works) |
 | `/capture`, `/capture/async`, `/capture/html`, `/capture/html/async` | One-shot URL → markdown | [Capture](/api-reference/capture) |
 | `/jobs`, `/jobs/{id}` | Async capture status | [Jobs](/api-reference/jobs) |
 | `/vault` | Vault CRUD | [Vault docs](/api-reference/vault-docs) |
-| `/vault/search*` | FTS5 + vec + hybrid search | [Vault search](/api-reference/vault-search) |
+| `/vault/search`, `/vault/search/semantic`, `/vault/search/hybrid` | FTS5 + vector + hybrid search | [Vault search](/api-reference/vault-search) |
 | `/feeds` | RSS subscription registry | [Feeds](/api-reference/feeds) |
-| `/health` | Liveness probe (unauthenticated) | — |
+| `/chat` | Grounded RAG chat over a working set | (route exists; full docs TBD) |
+| `/admin/rotate-key` | Mint a new `AMPERSTAND_API_KEY` | [Create or rotate the API key](/api-key) |
 
 ## Conventions
 
-- **Auth**: every endpoint except `/health` requires `Authorization: Bearer <key>`. See [Authentication](/api-reference/authentication).
+- **Auth**: every endpoint except `/health` and `/auth/verify` requires `Authorization: Bearer <key>`. See [Authentication](/api-reference/authentication) for the full threat model + error shapes.
+- **Trailing slashes don't matter**: `/vault` and `/vault/` resolve to the same handler. No 307 redirects — your `Authorization` header and POST body always reach the route.
 - **IDs**: all docs use ULIDs — sortable, URL-safe, 26 chars.
 - **Frontmatter**: any field you put in the request body's `frontmatter` map lands in the markdown file's YAML frontmatter unchanged. Reserved keys (`id`, `body_hash`, `created_at`) are server-controlled.
-- **Errors**: 4xx are caller-fixable (bad URL, missing field, auth), 5xx mean the server tried and failed (extractor crashed, DB locked).
 
-## OpenAPI
+## Error shape
 
-The live OpenAPI schema is at `GET /openapi.json`. Swagger UI at `GET /docs` (when not in production mode).
+Every error response (4xx and 5xx) returns a JSON body with a **stable machine-readable code**:
+
+```json
+{
+  "detail": {
+    "error": "invalid_api_key",
+    "detail": "The bearer token does not match the server's configured AMPERSTAND_API_KEY..."
+  }
+}
+```
+
+Switch on `detail.error` (stable across versions) instead of regex-matching the human-readable `detail.detail` string. The full code list:
+
+| HTTP | `error` code | Meaning |
+| --- | --- | --- |
+| 401 | `missing_authorization_header` | No Authorization header on request |
+| 401 | `unsupported_auth_scheme` | Header present but not `Bearer ...` |
+| 401 | `invalid_api_key` | Bearer token doesn't match server's key |
+| 503 | `server_misconfigured` | Server has no `AMPERSTAND_API_KEY` set |
+| 503 | `feature_requires_openai_key` | Endpoint needs OpenAI; server's `OPENAI_API_KEY` is unset (response also includes `feature: "chat"\|"semantic_search"\|"hybrid_search_rerank"`) |
+| 429 | (rotation only) | `POST /admin/rotate-key` rate-limited (default: 1 per 10s) |
+
+Non-auth 4xx (bad URL, missing field, etc.) and 5xx (extractor crashed, DB locked) currently return `{"detail": "<message>"}` — no structured `error` code today. PRs welcome.
+
+## OpenAPI / Swagger / Redoc
+
+```bash
+curl https://your-server/openapi.json | jq .paths   # machine-readable schema
+open https://your-server/docs                       # Swagger UI in a browser
+open https://your-server/redoc                      # Redoc UI in a browser
+```
+
+**Exposed by default.** The auth dependency still gates every endpoint, so a passer-by sees the schema but can't actually call anything without the API key. Set `AMPERSTAND_HIDE_DOCS=1` on the server to suppress (paranoid deploys).
+
+## See also
+
+- [Curl cookbook](/api-reference/curl-cookbook) — pasteable command for every operation
+- [Authentication](/api-reference/authentication) — full auth model, threat model, error codes, key storage per client
+- [Build your own client](/examples/build-your-own) — Python + JS reference implementations

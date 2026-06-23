@@ -55,6 +55,17 @@ Some hosts block bots from YouTube / X / LinkedIn. If you have a residential pro
 | --- | --- |
 | `AMPERSTAND_PROXY_URL` | HTTP(S) proxy URL passed to yt-dlp and trafilatura |
 
+## API surface + admin behavior
+
+| Variable | Default | What |
+| --- | --- | --- |
+| `AMPERSTAND_HIDE_DOCS` | off (docs visible) | Set to `1` to hide `/openapi.json` / `/docs` / `/redoc`. The auth dep gates every endpoint regardless, so visible OpenAPI doesn't expose data — but if you don't want the schema discoverable at all, flip this. |
+| `AMPERSTAND_ENV_FILE` | `/etc/amperstand/env` | Path the server reads at startup for the env file. Frozen at process start — runtime changes ignored (security). |
+| `AMPERSTAND_ROTATE_MIN_INTERVAL_S` | `10` | Minimum seconds between successful `POST /admin/rotate-key` calls. Defends against a leaked-key attacker thrashing the env file. |
+| `AMPERSTAND_ALLOW_HTTP_ROTATE` | off | Set to `1` to allow `POST /admin/rotate-key` over HTTP (no `X-Forwarded-Proto: https`). Dev only — production should be on TLS so the new key isn't visible to a MITM. |
+| `AMPERSTAND_ADMIN_ORIGINS` | empty | Comma-separated list of allowed `Origin` headers for `/admin/*`. Empty = browser requests (with any `Origin`) are rejected unless they match. Non-browser requests (no `Origin` — curl, CLI, bot) pass through regardless. |
+| `AMPERSTAND_UVICORN_WORKERS` | `1` | uvicorn worker process count. **Keep at 1** — `/admin/rotate-key` refuses with 503 when >1 because in-memory rotation only updates one worker's env. |
+
 ## Reading config from a file
 
 On production, the systemd unit loads `/etc/amperstand/env` — same `KEY=VALUE` format as `.env` files, owned `root:amperstand` mode `0640`.
