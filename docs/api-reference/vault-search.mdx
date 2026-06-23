@@ -7,9 +7,9 @@ Three endpoints. Same input shape; different cost/quality trade-offs.
 
 | Endpoint | Backend | Latency | Best for |
 | --- | --- | --- | --- |
-| `POST /v1/docs/search` | SQLite FTS5 | < 5ms | Exact phrases, known terms |
-| `POST /v1/docs/search/semantic` | sqlite-vec | ~50ms | Conceptually-similar docs |
-| `POST /v1/docs/search/hybrid` | FTS5 + vec + LLM rerank | 1–3s | Fuzzy recall ("that post about...") |
+| `POST /vault/search` | SQLite FTS5 | < 5ms | Exact phrases, known terms |
+| `POST /vault/search/semantic` | sqlite-vec | ~50ms | Conceptually-similar docs |
+| `POST /vault/search/hybrid` | FTS5 + vec + LLM rerank | 1–3s | Fuzzy recall ("that post about...") |
 
 ## Request body (all three)
 
@@ -43,12 +43,12 @@ Three endpoints. Same input shape; different cost/quality trade-offs.
 
 `score` is mode-specific (FTS5 bm25 vs vector cosine vs fused). `rerank_score` is the LLM's quality estimate, 0–1.
 
-## POST /v1/docs/search
+## POST /vault/search
 
 Keyword search via SQLite FTS5. Sub-millisecond.
 
 ```bash
-curl -X POST http://localhost:8765/v1/docs/search \
+curl -X POST http://localhost:8765/vault/search \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"q":"hardware development", "limit":10}'
@@ -56,12 +56,12 @@ curl -X POST http://localhost:8765/v1/docs/search \
 
 Supports FTS5 query syntax: `"exact phrase"`, `term1 OR term2`, `term -exclude`, `NEAR(a b, 5)`.
 
-## POST /v1/docs/search/semantic
+## POST /vault/search/semantic
 
 Embedding cosine similarity via `sqlite-vec`. Finds related docs that don't share vocabulary.
 
 ```bash
-curl -X POST http://localhost:8765/v1/docs/search/semantic \
+curl -X POST http://localhost:8765/vault/search/semantic \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"q":"what makes building chips slow", "limit":10}'
@@ -75,12 +75,12 @@ To backfill embeddings on docs captured before `OPENAI_API_KEY` was set:
 amperstand-admin vec_rebuild
 ```
 
-## POST /v1/docs/search/hybrid
+## POST /vault/search/hybrid
 
 Runs FTS5 and semantic in parallel, fuses scores via reciprocal-rank-fusion, optionally reranks top-K with an LLM.
 
 ```bash
-curl -X POST http://localhost:8765/v1/docs/search/hybrid \
+curl -X POST http://localhost:8765/vault/search/hybrid \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"q":"that post about why chips take so long", "rerank":true, "limit":10}'

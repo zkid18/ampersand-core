@@ -33,7 +33,7 @@ class Vault:
 
     def search(self, q: str, limit: int = 10) -> list[dict]:
         r = self.client.post(
-            "/v1/docs/search/hybrid",
+            "/vault/search/hybrid",
             json={"q": q, "limit": limit, "rerank": True},
         )
         return r.json()["items"]

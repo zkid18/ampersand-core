@@ -44,11 +44,11 @@ Every agent surface speaks to the same HTTP API. Capabilities they unlock:
 
 | Operation | Endpoint | Use it for |
 | --- | --- | --- |
-| **Search** | `POST /v1/docs/search/hybrid` | "What do I have on X?" — primary research move |
-| **Read a specific doc** | `GET /v1/docs/{id}` | "Pull the full body so I can quote from it" |
-| **Find related** | `GET /v1/docs/{id}/related` | "What else have I saved like this one?" — neighborhood expansion |
+| **Search** | `POST /vault/search/hybrid` | "What do I have on X?" — primary research move |
+| **Read a specific doc** | `GET /vault/{id}` | "Pull the full body so I can quote from it" |
+| **Find related** | `GET /vault/{id}/related` | "What else have I saved like this one?" — neighborhood expansion |
 | **Capture a new URL** | `POST /capture` | "Add this to my vault so I can find it later" |
-| **List recent** | `GET /v1/docs?limit=N&since=...` | "What've I captured this week?" |
+| **List recent** | `GET /vault?limit=N&since=...` | "What've I captured this week?" |
 
 The agent surfaces are just well-shaped wrappers around these calls + a system prompt that teaches the model citation discipline and the "if you don't know, say [uncertain]" rule.
 

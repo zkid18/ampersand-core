@@ -75,7 +75,7 @@ amperstand vault status
 If you also configured `OPENAI_API_KEY` on the server, semantic search works:
 
 ```bash
-curl -X POST https://your-server/v1/docs/search/semantic \
+curl -X POST https://your-server/vault/search/semantic \
      -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"q":"hardware development", "limit":3}'

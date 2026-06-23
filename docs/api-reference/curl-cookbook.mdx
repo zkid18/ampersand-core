@@ -1,0 +1,192 @@
+---
+title: Curl cookbook
+description: "Pasteable curl commands for every common operation. Verify auth, capture, search, read, list, delete, rotate."
+---
+
+For integrators wiring an external client (Zapier, n8n, your own code, anything that speaks HTTP). Every endpoint requires the API key — see [Authentication](/api-reference/authentication). Substitute `$AMPERSTAND_BASE_URL` and `$AMPERSTAND_API_KEY` with your values (or `export` them once and the snippets below work as-is).
+
+## Verify your key works
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/auth/verify"
+# {"ok": true, "auth": "bearer", "scheme": "amperstand-api-key"}
+```
+
+Use this from CI / monitoring / on first connect. Side-effect-free; no real data returned.
+
+## Liveness check (no auth)
+
+```bash
+curl "$AMPERSTAND_BASE_URL/health"
+# {"status": "ok"}
+```
+
+The only unauthenticated endpoint. Useful for load-balancer probes.
+
+## Capture a URL
+
+```bash
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://danluu.com/why-hardware-development-is-hard/"}' \
+     "$AMPERSTAND_BASE_URL/capture"
+```
+
+Idempotent on source URL — re-posting the same URL returns the existing doc ID, no duplicate. The response includes `id`, `title`, `path`, and the extracted `markdown`.
+
+## Capture from pre-rendered HTML
+
+```bash
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://...", "html": "<html>...</html>", "title": "Optional"}' \
+     "$AMPERSTAND_BASE_URL/capture/html"
+```
+
+For pages where your client has better-rendered HTML than the server could fetch (auth-walled, JS-rendered, Cloudflare-challenged).
+
+## Async capture (returns immediately with a job_id)
+
+```bash
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://..."}' \
+     "$AMPERSTAND_BASE_URL/capture/async"
+# {"job_id": "01JK...", "status": "queued"}
+```
+
+For UIs that close before extraction completes (Telegram bot popup, browser extension popup, mobile share sheets). Poll the job:
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/jobs/01JK..."
+# {"status": "done", "doc_id": "01KR...", ...}
+```
+
+## List recent docs
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/vault?limit=20"
+# {"items": [...], "total": 1247}
+```
+
+Newest first by default.
+
+## Read a doc back
+
+```bash
+# JSON with frontmatter + parsed body
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/vault/01JK..."
+
+# Raw markdown (exactly as on disk — pipe into an editor)
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/vault/01JK.../raw" > article.md
+```
+
+## Search
+
+```bash
+# Keyword (FTS5) — sub-millisecond
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"q": "hardware development", "limit": 10}' \
+     "$AMPERSTAND_BASE_URL/vault/search"
+
+# Semantic (KNN over embeddings) — requires OPENAI_API_KEY on server
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"q": "why building chips is slow", "limit": 10}' \
+     "$AMPERSTAND_BASE_URL/vault/search/semantic"
+
+# Hybrid + LLM rerank — best for "I half-remember this thing about X"
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"q": "that post about why chips take so long", "limit": 10, "rerank": true}' \
+     "$AMPERSTAND_BASE_URL/vault/search/hybrid"
+```
+
+## Find related docs
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/vault/01JK.../related?limit=10"
+```
+
+Centroid-based similarity. "More like this one."
+
+## Manage feeds
+
+```bash
+# Subscribe
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://danluu.com/atom.xml", "label": "Dan Luu"}' \
+     "$AMPERSTAND_BASE_URL/feeds/register"
+
+# List subscriptions
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/feeds"
+
+# Trigger a server-side sync (server has a cron; this just kicks it now)
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{}' "$AMPERSTAND_BASE_URL/feeds/sync"
+
+# Unsubscribe
+curl -X DELETE -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/feeds/01JK..."
+```
+
+## Delete a doc
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/vault/01JK..."
+```
+
+Hard delete — no trash. Confirm before scripting.
+
+## Rotate the API key
+
+```bash
+# Requires HTTPS (see Authentication for the trade-off + recovery path)
+curl -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
+     "$AMPERSTAND_BASE_URL/admin/rotate-key"
+# {"new_api_key": "<new>", "warning": "...restart bot/watcher/feed-sync..."}
+```
+
+See [Create or rotate the API key](/api-key) for the full rotation runbook + lockout discussion.
+
+## Trailing slashes
+
+`/vault` and `/vault/` resolve to the same handler. Same for every route. No redirects, no surprise auth-header drops on POSTs.
+
+## Error responses you might hit
+
+| HTTP | `error` code | Fix |
+| --- | --- | --- |
+| 401 | `missing_authorization_header` | Add `-H "Authorization: Bearer ..."` |
+| 401 | `unsupported_auth_scheme` | Use `Bearer`, not `Basic` / `Token` / etc. |
+| 401 | `invalid_api_key` | Key wrong / mismatched / recently rotated — re-export the env var |
+| 503 | `server_misconfigured` | Server's `AMPERSTAND_API_KEY` is unset; operator must configure |
+| 503 | `feature_requires_openai_key` | Endpoint needs OpenAI; set `OPENAI_API_KEY` on the server |
+| 429 | (rotation only) | Rate-limited; minimum 10s between rotations |
+
+## Discover the full surface
+
+```bash
+curl "$AMPERSTAND_BASE_URL/openapi.json" | jq .paths
+```
+
+OpenAPI / Swagger / Redoc are exposed by default. The auth dependency still gates every endpoint — passers-by see the schema but can't call anything without the key.
+
+To hide the schema entirely on a paranoid deploy: `AMPERSTAND_HIDE_DOCS=1` on the server.
+
+## See also
+
+- [Full API reference](/api-reference/overview) — every endpoint's request/response schema
+- [Authentication](/api-reference/authentication) — threat model, error codes, rotation
+- [Build your own client](/examples/build-your-own) — Python and JS reference implementations

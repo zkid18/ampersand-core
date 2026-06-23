@@ -35,12 +35,12 @@ answer questions with citations) and WRITE to it (to save new URLs).
 | Endpoint                                            | Body                                                   | When                                                                |
 |-----------------------------------------------------|--------------------------------------------------------|---------------------------------------------------------------------|
 | POST /capture                                       | {"url":"..."}                                          | Save a URL. Idempotent on source URL — re-saving is safe.           |
-| POST /v1/docs/search/hybrid                         | {"q":"...","limit":10,"rerank":true}                   | Default for "find docs about X". BM25 + vector + LLM rerank.        |
-| GET  /v1/docs/{id}                                  | —                                                      | Read a doc's full body + frontmatter for quoting.                   |
-| GET  /v1/docs/{id}/related?limit=10                 | —                                                      | "More like this." Centroid-based similarity.                        |
-| GET  /v1/docs?limit=20&order=updated                | —                                                      | Browse newest captures.                                             |
+| POST /vault/search/hybrid                         | {"q":"...","limit":10,"rerank":true}                   | Default for "find docs about X". BM25 + vector + LLM rerank.        |
+| GET  /vault/{id}                                  | —                                                      | Read a doc's full body + frontmatter for quoting.                   |
+| GET  /vault/{id}/related?limit=10                 | —                                                      | "More like this." Centroid-based similarity.                        |
+| GET  /vault?limit=20&order=updated                | —                                                      | Browse newest captures.                                             |
 
-Default to hybrid+rerank on the first read pass. Switch to /v1/docs/search
+Default to hybrid+rerank on the first read pass. Switch to /vault/search
 (FTS5, no body shown above — append ?q=... to GET, or POST same body) for
 exact phrase / quoted-string queries.
 

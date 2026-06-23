@@ -45,7 +45,7 @@ The server dedups on the URL via `body_hash`. Re-capturing the same article is c
 The CLI doesn't have a search subcommand today (the API does). Use `curl`:
 
 ```bash
-curl -s -X POST https://your-server/v1/docs/search/hybrid \
+curl -s -X POST https://your-server/vault/search/hybrid \
     -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
     -H "Content-Type: application/json" \
     -d '{"q":"your query", "limit":10, "rerank":true}' \
@@ -64,7 +64,7 @@ For a more guided experience, install the deep-research [Claude Skill](/agent-sk
     ## Vault tools
 
     - To save a URL to my Amperstand vault, run: `amperstand capture <url>`
-    - To search the vault, POST to `https://your-server/v1/docs/search/hybrid`
+    - To search the vault, POST to `https://your-server/vault/search/hybrid`
       with `Authorization: Bearer $AMPERSTAND_API_KEY`.
     - For deep research, invoke `/vault-research <topic>` (see /agent-skill).
     ```

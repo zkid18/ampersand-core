@@ -70,6 +70,7 @@
             "pages": [
               "api-reference/overview",
               "api-reference/authentication",
+              "api-reference/curl-cookbook",
               "api-reference/capture",
               "api-reference/jobs",
               "api-reference/vault-docs",

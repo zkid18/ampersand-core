@@ -19,7 +19,7 @@ Most of Amperstand's features need third-party APIs you bring yourself. Be hones
 | --- | --- | --- |
 | **Embeddings** (semantic + hybrid search) | `text-embedding-3-small` | ~$0.02 per 1,000 docs at capture time |
 | **Hybrid-search rerank** (default behavior; deep-research skill leans on it) | `gpt-4o-mini` | ~$0.001 per query |
-| **Chat-with-vault** (`/v1/chat` — notebook UI) | `gpt-4o-mini` | ~$0.001 per chat turn |
+| **Chat-with-vault** (`/chat` — notebook UI) | `gpt-4o-mini` | ~$0.001 per chat turn |
 | **YouTube audio-fallback transcripts** (opt-in via `AMPERSTAND_YOUTUBE_AUDIO_FALLBACK=1`) | OpenAI Whisper | ~$0.006/min of audio |
 
 **Without `OPENAI_API_KEY`:** capture + keyword search still work; semantic + hybrid + chat return `503`; YouTube without captions returns a metadata stub.

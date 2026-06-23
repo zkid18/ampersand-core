@@ -50,7 +50,7 @@ For a list of recent docs, the CLI doesn't have a wrapper today — hit the API 
 
 ```bash
 curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-  "$AMPERSTAND_BASE_URL/v1/docs?limit=10" \
+  "$AMPERSTAND_BASE_URL/vault?limit=10" \
   | jq -r '.items[] | "\(.id)  \(.title)"'
 ```
 
@@ -63,14 +63,14 @@ Three search modes — keyword (fast, exact), semantic (slow, conceptual), hybri
 curl -s -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"q":"hardware development", "limit":5}' \
-  $AMPERSTAND_BASE_URL/v1/docs/search \
+  $AMPERSTAND_BASE_URL/vault/search \
   | jq -r '.items[] | "\(.id)  \(.title)"'
 
 # Hybrid + rerank — best for "I half-remember this thing about..." queries
 curl -s -X POST -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"q":"that post about why chips take so long", "limit":5, "rerank":true}' \
-  $AMPERSTAND_BASE_URL/v1/docs/search/hybrid \
+  $AMPERSTAND_BASE_URL/vault/search/hybrid \
   | jq -r '.items[] | "\(.score | tonumber | floor)  \(.title)"'
 ```
 
@@ -83,11 +83,11 @@ Once you have a doc ID (from capture output, from search results, from `vault st
 ```bash
 # JSON with frontmatter + parsed body
 curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-  $AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4...
+  $AMPERSTAND_BASE_URL/vault/01JK8XQ4...
 
 # Raw markdown (frontmatter + body, exactly as on disk)
 curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-  $AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4.../raw \
+  $AMPERSTAND_BASE_URL/vault/01JK8XQ4.../raw \
   > /tmp/article.md
 ```
 
@@ -122,7 +122,7 @@ You've found a doc you like. What else have you captured on the topic?
 
 ```bash
 curl -s -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-  "$AMPERSTAND_BASE_URL/v1/docs/01JK8XQ4.../related?limit=10" \
+  "$AMPERSTAND_BASE_URL/vault/01JK8XQ4.../related?limit=10" \
   | jq -r '.items[] | "\(.id)  \(.title)"'
 ```
 

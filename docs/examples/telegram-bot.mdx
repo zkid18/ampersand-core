@@ -12,10 +12,10 @@ Use this as a starting point for any chat-based client (Discord, Slack, IRC — 
 | User action | Bot behavior |
 | --- | --- |
 | DMs a URL alone | POST `/capture` → reply with saved doc ID |
-| DMs text | POST `/v1/docs` with the text as body, first line as title |
-| `/list` | GET `/v1/docs?limit=10` |
-| `/get <id-prefix>` | GET `/v1/docs/{id}` |
-| `/search <query>` | POST `/v1/docs/search/hybrid` |
+| DMs text | POST `/vault` with the text as body, first line as title |
+| `/list` | GET `/vault?limit=10` |
+| `/get <id-prefix>` | GET `/vault/{id}` |
+| `/search <query>` | POST `/vault/search/hybrid` |
 | `/whoami` | Returns the user's Telegram numeric ID (for the allowlist) |
 
 ## Project structure
@@ -57,13 +57,13 @@ class VaultClient:
         return r.json()
 
     async def list_docs(self, limit: int = 10) -> list[dict]:
-        r = await self._client.get(f"/v1/docs?limit={limit}")
+        r = await self._client.get(f"/vault?limit={limit}")
         r.raise_for_status()
         return r.json()["items"]
 
     async def search(self, q: str, limit: int = 10, rerank: bool = True) -> list[dict]:
         r = await self._client.post(
-            "/v1/docs/search/hybrid",
+            "/vault/search/hybrid",
             json={"q": q, "limit": limit, "rerank": rerank},
         )
         r.raise_for_status()

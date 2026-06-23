@@ -75,7 +75,7 @@ Before sending to the LLM, replace:
 
 ## Pattern: rag-chat-system.md
 
-Use when the caller has *already chosen* a working set of docs and wants the LLM to answer strictly from those. This is what `POST /v1/chat` uses internally.
+Use when the caller has *already chosen* a working set of docs and wants the LLM to answer strictly from those. This is what `POST /chat` uses internally.
 
 ```
 You are a research assistant answering questions strictly grounded in the
@@ -92,7 +92,7 @@ You assemble `{{DOCS_BLOCK}}` by concatenating doc bodies (each prefixed with it
 
 ## Pattern: rerank-judge.md
 
-For building your own search pipeline. Takes a query + a search hit, returns a 0–10 relevance score. Pair with `/v1/docs/search` (FTS5) or `/v1/docs/search/semantic` to add an LLM rerank stage to whatever ranking you've got.
+For building your own search pipeline. Takes a query + a search hit, returns a 0–10 relevance score. Pair with `/vault/search` (FTS5) or `/vault/search/semantic` to add an LLM rerank stage to whatever ranking you've got.
 
 ## Citations resolve back to your vault
 
@@ -115,7 +115,7 @@ Every vault doc carries this in frontmatter as `source:`. The flow to turn an in
 # To turn that into a footnote, fetch the doc and read its source:
 
 curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" \
-     https://your-server/v1/docs/01JK8XQ4...
+     https://your-server/vault/01JK8XQ4...
 
 # Response includes:
 #   "source": "https://danluu.com/why-hardware-development-is-hard/",
@@ -140,7 +140,7 @@ doc_ids = set(re.findall(r"\[([0-9A-Z]{26})\]", draft))
 footnotes = []
 for i, doc_id in enumerate(sorted(doc_ids), start=1):
     doc = httpx.get(
-        f"https://your-server/v1/docs/{doc_id}",
+        f"https://your-server/vault/{doc_id}",
         headers={"Authorization": f"Bearer {os.environ['AMPERSTAND_API_KEY']}"},
     ).json()
     fm = doc["frontmatter"]

@@ -227,12 +227,22 @@ class CaptureResponse(BaseModel):
 
 
 def create_app(*, docs_visible: bool | None = None) -> FastAPI:
-    """Build the FastAPI app. By default Swagger/OpenAPI are disabled so the
-    surface isn't advertised on a public deploy. Set AMPERSTAND_PUBLIC_DOCS=1 to
-    re-enable them.
+    """Build the FastAPI app.
+
+    OpenAPI / Swagger / Redoc are EXPOSED by default — integrators need a
+    discoverable schema. The auth dependency still protects every endpoint,
+    so a passer-by sees the schema but can't actually call anything without
+    the API key. To suppress the schema entirely (paranoid deploys), set
+    AMPERSTAND_HIDE_DOCS=1.
     """
     if docs_visible is None:
-        docs_visible = _env_bool("AMPERSTAND_PUBLIC_DOCS")
+        # New default: docs are ON unless explicitly hidden. Old AMPERSTAND_
+        # PUBLIC_DOCS env var is honored for backward compat — if set, treat
+        # as "force visible" (matches its old behavior).
+        if _env_bool("AMPERSTAND_HIDE_DOCS"):
+            docs_visible = False
+        else:
+            docs_visible = True
     docs_kw = (
         {}
         if docs_visible
@@ -295,6 +305,11 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
         description="Capture anything from the web as markdown.",
         version="0.1.0",
         lifespan=_lifespan,
+        # Trailing-slash normalization OFF so /vault and /vault/ both work
+        # the same way (route registered once; both URLs resolve to it).
+        # Redirects can drop Authorization headers in strict clients and
+        # are surprising for POST bodies — better to just match both shapes.
+        redirect_slashes=False,
         **docs_kw,
     )
 
@@ -536,6 +551,20 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
     @app.get("/health")
     def health():
         return {"status": "ok"}
+
+    @app.get(
+        "/auth/verify",
+        dependencies=[Depends(require_api_key)],
+    )
+    def auth_verify() -> dict:
+        """Side-effect-free check that your API key works.
+
+        Returns 200 with a small payload if the key is valid; returns the
+        structured 401 from require_api_key otherwise. Use this from
+        clients / CI to confirm credentials before making real calls —
+        beats hitting /vault which returns real data.
+        """
+        return {"ok": True, "auth": "bearer", "scheme": "amperstand-api-key"}
 
     # Rotation is serialized by a single lock so two concurrent /admin/rotate-key
     # calls can't race the disk vs in-memory write (which would let the caller

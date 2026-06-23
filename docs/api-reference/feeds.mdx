@@ -5,12 +5,12 @@ description: "Server-side RSS/Atom subscription registry."
 
 The feed registry is a SQLite table of subscriptions. The server polls them on a schedule, and every client (CLI, bot, extension) reads the same list.
 
-## POST /v1/feeds/preview
+## POST /feeds/preview
 
 Inspect a feed URL **without** subscribing — title, item count, sample entries. Useful for the "add feed" UI to show what the user is about to subscribe to.
 
 ```bash
-curl -X POST http://localhost:8765/v1/feeds/preview \
+curl -X POST http://localhost:8765/feeds/preview \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"url":"https://danluu.com/atom.xml"}'
@@ -28,12 +28,12 @@ curl -X POST http://localhost:8765/v1/feeds/preview \
 }
 ```
 
-## POST /v1/feeds/register
+## POST /feeds/register
 
 Subscribe to a feed.
 
 ```bash
-curl -X POST http://localhost:8765/v1/feeds/register \
+curl -X POST http://localhost:8765/feeds/register \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"url":"https://danluu.com/atom.xml", "label":"Dan Luu"}'
@@ -52,13 +52,13 @@ curl -X POST http://localhost:8765/v1/feeds/register \
 }
 ```
 
-## GET /v1/feeds
+## GET /feeds
 
 List all subscriptions.
 
 ```bash
 curl -H "Authorization: Bearer $KEY" \
-     http://localhost:8765/v1/feeds
+     http://localhost:8765/feeds
 ```
 
 ### Response
@@ -79,31 +79,31 @@ curl -H "Authorization: Bearer $KEY" \
 }
 ```
 
-## DELETE /v1/feeds/{feed_id}
+## DELETE /feeds/{feed_id}
 
 Unsubscribe. Returns `204`. Captured items remain in the vault — only the subscription is removed.
 
 ```bash
 curl -X DELETE -H "Authorization: Bearer $KEY" \
-     http://localhost:8765/v1/feeds/01JK...
+     http://localhost:8765/feeds/01JK...
 ```
 
-## POST /v1/feeds/{feed_id}/disable · POST /v1/feeds/{feed_id}/enable
+## POST /feeds/{feed_id}/disable · POST /feeds/{feed_id}/enable
 
 Temporarily pause / resume a subscription without losing its history. Both return the updated feed row.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $KEY" \
-     http://localhost:8765/v1/feeds/01JK.../disable
+     http://localhost:8765/feeds/01JK.../disable
 ```
 
-## POST /v1/feeds/sync
+## POST /feeds/sync
 
 Run a one-shot sync across all enabled feeds. Returns counts. Typically the server runs this on a cron internally; this endpoint lets you trigger it manually.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $KEY" \
-     http://localhost:8765/v1/feeds/sync
+     http://localhost:8765/feeds/sync
 ```
 
 ### Response
@@ -116,12 +116,12 @@ curl -X POST -H "Authorization: Bearer $KEY" \
 }
 ```
 
-## POST /v1/feeds/ingest
+## POST /feeds/ingest
 
 Lower-level: ingest a single feed URL right now without registering it. The server fetches, parses, and persists each item. Useful for one-off imports.
 
 ```bash
-curl -X POST http://localhost:8765/v1/feeds/ingest \
+curl -X POST http://localhost:8765/feeds/ingest \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{"url":"https://example.com/feed.xml"}'

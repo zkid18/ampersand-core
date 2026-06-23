@@ -35,7 +35,7 @@ Every captured doc has these frontmatter fields. Field names and types are part 
 | Field | Type | Who sets it | Notes |
 | --- | --- | --- | --- |
 | `id` | ULID (26-char string) | **Server** | Stable, sortable, URL-safe. The only handle that survives renames and re-captures. |
-| `title` | string | Extractor; user may override | If you POST a `frontmatter: {"title": "..."}` to `/capture` or `/v1/docs`, your value wins. |
+| `title` | string | Extractor; user may override | If you POST a `frontmatter: {"title": "..."}` to `/capture` or `/vault`, your value wins. |
 | `source` | URL string | Server | The URL captured. Used for idempotency (re-capturing the same URL is a no-op — see below). |
 | `type` | enum: `article`, `youtube`, `linkedin`, `tweet`, `feed`, `email`, `note` | Extractor; user may override | Picked by the URL-shape detector. |
 | `created_at` | RFC3339 string (always UTC `Z`) | Server | First-capture timestamp. Never recomputed on re-write. |
@@ -137,7 +137,7 @@ The async endpoints (`/capture/async`, `/capture/html/async`) return immediately
 
 ## Feed registry
 
-Subscribed RSS/Atom feeds live in a server-side **feed registry** — a SQLite table with `feed_id`, `url`, `last_sync`, `etag`, `last_status`. The CLI's `feed add` writes to this registry via `POST /v1/feeds/register`; the server's sync job reads from it on its own schedule.
+Subscribed RSS/Atom feeds live in a server-side **feed registry** — a SQLite table with `feed_id`, `url`, `last_sync`, `etag`, `last_status`. The CLI's `feed add` writes to this registry via `POST /feeds/register`; the server's sync job reads from it on its own schedule.
 
 Server-side state means all clients see the same subscription list. `amperstand feed list` on your laptop and `/feeds` in the Telegram bot show the same feeds.
 
@@ -150,7 +150,7 @@ Three modes, increasing in cost and quality:
     Pure SQLite full-text search. Sub-millisecond, no embeddings needed. Best for exact phrases or known terminology.
 
     ```bash
-    curl -X POST $URL/v1/docs/search \
+    curl -X POST $URL/vault/search \
         -H "Authorization: Bearer $KEY" \
         -d '{"q":"hardware development", "limit":10}'
     ```
@@ -159,7 +159,7 @@ Three modes, increasing in cost and quality:
     Embedding similarity using `sqlite-vec`. Finds conceptually-related docs that don't share words. ~50ms per query. Needs `OPENAI_API_KEY` set on the server.
 
     ```bash
-    curl -X POST $URL/v1/docs/search/semantic \
+    curl -X POST $URL/vault/search/semantic \
         -H "Authorization: Bearer $KEY" \
         -d '{"q":"what makes building chips slow", "limit":10}'
     ```
@@ -168,7 +168,7 @@ Three modes, increasing in cost and quality:
     Runs both, fuses scores, then reranks top-K with an LLM. Slowest (1–3s) but best quality for "I half-remember this thing about..." queries.
 
     ```bash
-    curl -X POST $URL/v1/docs/search/hybrid \
+    curl -X POST $URL/vault/search/hybrid \
         -H "Authorization: Bearer $KEY" \
         -d '{"q":"that post about why chips take so long", "rerank":true}'
     ```

@@ -97,7 +97,7 @@ Without `--delete` and without bidirectional sync: your local edits persist, but
 For "I want to edit in Obsidian AND have those edits flow back to the server":
 
 1. Use Syncthing or rclone with proper conflict-resolution rules
-2. Tell the server about your laptop changes via the HTTP API — `PUT /v1/docs/{id}` with the new body
+2. Tell the server about your laptop changes via the HTTP API — `PUT /vault/{id}` with the new body
 3. Or run the server's `amperstand-vault-watcher.service` against the synced folder (watches for filesystem changes and re-indexes)
 
 Honest assessment: this works but it's not turnkey. For most users, **one-way mirror + edits via the API (e.g. `amperstand capture` re-sending a URL with updated `frontmatter: {tags: [...]}`)** is more reliable than two-way file sync.

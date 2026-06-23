@@ -70,10 +70,15 @@ def _require_openai() -> str:
     if not key:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "chat disabled — OPENAI_API_KEY not set on the server. "
-                "Add it to /etc/amperstand/env and restart amperstand-server."
-            ),
+            detail={
+                "error": "feature_requires_openai_key",
+                "feature": "chat",
+                "detail": (
+                    "Chat is disabled because OPENAI_API_KEY is not set on "
+                    "the server. Add it to /etc/amperstand/env and restart "
+                    "amperstand-server."
+                ),
+            },
         )
     return key
 

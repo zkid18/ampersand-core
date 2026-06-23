@@ -67,10 +67,10 @@ For richer flows (async extraction, capture from pre-rendered HTML, capturing `.
 ## Feeds
 
 ```bash
-amperstand feed add <url>           # subscribe (POST /v1/feeds/register)
-amperstand feed remove <feed-id>    # unsubscribe (DELETE /v1/feeds/{id})
-amperstand feed list                # show subscriptions + last sync (GET /v1/feeds)
-amperstand feed sync                # trigger a server-side sync (POST /v1/feeds/sync)
+amperstand feed add <url>           # subscribe (POST /feeds/register)
+amperstand feed remove <feed-id>    # unsubscribe (DELETE /feeds/{id})
+amperstand feed list                # show subscriptions + last sync (GET /feeds)
+amperstand feed sync                # trigger a server-side sync (POST /feeds/sync)
 ```
 
 `feed remove` also accepts the feed URL — the CLI looks it up in the server's list and resolves the ID for you.

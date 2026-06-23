@@ -3,7 +3,7 @@ title: Authentication
 description: "How the API key works — generation, rotation, threat model."
 ---
 
-Every endpoint (except `/health`) requires an API key, sent in an HTTP header:
+Every endpoint (except `/health` and `/auth/verify`) requires an API key, sent in an HTTP header:
 
 ```
 Authorization: Bearer <AMPERSTAND_API_KEY>
@@ -14,6 +14,40 @@ There is one API key for the whole server. It's stored at `/etc/amperstand/env`,
 <Info>
 **Why does the header say "Bearer"?** It's the HTTP spec name for this kind of auth scheme — `Bearer` means "whoever bears (holds) this token has access." You'll see `Authorization: Bearer <key>` in tons of APIs (GitHub, Stripe, OpenAI, Slack). The word `Bearer` is a literal that goes in the header verbatim; everywhere else in these docs we just call it "the API key."
 </Info>
+
+## Verify your key works
+
+```bash
+curl -H "Authorization: Bearer $AMPERSTAND_API_KEY" https://your-server/auth/verify
+# 200 OK
+# {"ok": true, "auth": "bearer", "scheme": "amperstand-api-key"}
+```
+
+`GET /auth/verify` is the canonical "is my key good?" endpoint. Side-effect-free, no real data returned. Use it from clients / CI / monitoring to confirm credentials before making real calls.
+
+## Error responses
+
+Every auth failure returns a structured JSON body. The `error` field is a stable machine-readable code; the `detail` is a human-readable explanation.
+
+| HTTP status | `error` code | When |
+| --- | --- | --- |
+| `401` | `missing_authorization_header` | No `Authorization` header sent at all |
+| `401` | `unsupported_auth_scheme` | Header doesn't start with `Bearer ` |
+| `401` | `invalid_api_key` | Bearer token doesn't match the server's configured key |
+| `503` | `server_misconfigured` | Server has no `AMPERSTAND_API_KEY` set in its env |
+
+Example body for a 401 with wrong key:
+
+```json
+{
+  "detail": {
+    "error": "invalid_api_key",
+    "detail": "The bearer token does not match the server's configured AMPERSTAND_API_KEY. If you recently rotated, re-export the env var or re-paste the key into your client config."
+  }
+}
+```
+
+For OPENAI_API_KEY-dependent features (semantic search, hybrid rerank, chat), 503s return `{"error": "feature_requires_openai_key", "feature": "<feature_name>", "detail": "..."}` so you can disambiguate them from `server_misconfigured`.
 
 ## How the key is generated
 
@@ -38,11 +72,11 @@ The `bootstrap.sh` script runs this once on first install and writes the result 
 
 The API key is a **master credential**. Anyone holding it can:
 
-- Read every doc in the vault (`GET /v1/docs`, `GET /v1/docs/{id}`)
+- Read every doc in the vault (`GET /vault`, `GET /vault/{id}`)
 - Capture new docs from any URL (`POST /capture`)
-- Modify existing docs (`PUT /v1/docs/{id}`)
-- Delete docs (`DELETE /v1/docs/{id}` — hard delete, no trash)
-- Run arbitrary search and chat queries against your corpus (`POST /v1/docs/search/*`, `POST /v1/chat`)
+- Modify existing docs (`PUT /vault/{id}`)
+- Delete docs (`DELETE /vault/{id}` — hard delete, no trash)
+- Run arbitrary search and chat queries against your corpus (`POST /vault/search/*`, `POST /chat`)
 
 There's **no scope, no read-only mode, no per-client identity**. If you give the API key to the Telegram bot, the bot can also delete things.
 

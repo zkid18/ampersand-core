@@ -49,7 +49,7 @@ curl http://localhost/health
 # {"status":"ok"}
 
 curl -H "Authorization: Bearer $(grep AMPERSTAND_API_KEY .env | cut -d= -f2-)" \
-     http://localhost/v1/docs
+     http://localhost/vault
 # {"items":[],"next_cursor":null}
 ```
 

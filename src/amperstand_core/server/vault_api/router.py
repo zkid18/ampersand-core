@@ -259,8 +259,15 @@ def search(
             if vec is None:
                 raise HTTPException(
                     status_code=503,
-                    detail="semantic search disabled — set OPENAI_API_KEY and run "
-                           "`amperstand-admin vec-rebuild` to populate the vector index.",
+                    detail={
+                        "error": "feature_requires_openai_key",
+                        "feature": "semantic_search",
+                        "detail": (
+                            "Semantic search is disabled. Set OPENAI_API_KEY on "
+                            "the server and run `amperstand-admin vec-rebuild` "
+                            "to populate the vector index."
+                        ),
+                    },
                 )
             qvec = vec._embedder.embed(payload.q)
             results = vec.index.search(qvec, limit=payload.limit)
@@ -307,8 +314,15 @@ def _require_vec(vec: VectorIndexer | None) -> VectorIndexer:
     if vec is None:
         raise HTTPException(
             status_code=503,
-            detail="semantic search disabled — set OPENAI_API_KEY and run "
-                   "`amperstand-admin vec-rebuild` to populate the vector index.",
+            detail={
+                "error": "feature_requires_openai_key",
+                "feature": "semantic_search",
+                "detail": (
+                    "Semantic search is disabled. Set OPENAI_API_KEY on the "
+                    "server and run `amperstand-admin vec-rebuild` to populate "
+                    "the vector index."
+                ),
+            },
         )
     return vec
 
@@ -363,7 +377,15 @@ def search_hybrid(
     if bool(payload.rerank) and not rerank_enabled():
         raise HTTPException(
             status_code=503,
-            detail="rerank requested but disabled — set OPENAI_API_KEY to enable.",
+            detail={
+                "error": "feature_requires_openai_key",
+                "feature": "hybrid_search_rerank",
+                "detail": (
+                    "Rerank was requested but is disabled. Set OPENAI_API_KEY "
+                    "on the server to enable. Or set rerank=false in the "
+                    "request body to get BM25+vector results without rerank."
+                ),
+            },
         )
     use_rerank = bool(payload.rerank)
     # When rerank is on, fetch a fatter candidate pool so the LLM has more
