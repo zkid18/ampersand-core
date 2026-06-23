@@ -22,10 +22,13 @@
             ]
           },
           {
-            "group": "Get a server running",
+            "group": "Run a server",
             "pages": [
               "quickstart",
-              "server-install-docker"
+              "server-install-docker",
+              "configuration",
+              "deployment",
+              "api-key"
             ]
           },
           {
@@ -34,7 +37,8 @@
               "cli-install",
               "cli-quickstart",
               "cli-reference",
-              "admin-cli"
+              "admin-cli",
+              "vault-sync-local"
             ]
           },
           {
@@ -54,15 +58,6 @@
               "examples/build-your-own",
               "examples/telegram-bot",
               "examples/browser-extension"
-            ]
-          },
-          {
-            "group": "Operate in production",
-            "pages": [
-              "deployment",
-              "api-key",
-              "configuration",
-              "vault-sync-local"
             ]
           },
           {
