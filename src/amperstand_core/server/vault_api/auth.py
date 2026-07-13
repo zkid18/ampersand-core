@@ -50,7 +50,7 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
         raise _err(
             "missing_authorization_header",
             "Send `Authorization: Bearer <your-api-key>` with every request "
-            "except /health and /auth/verify.",
+            "except /health.",
         )
     if not authorization.startswith(_BEARER_PREFIX):
         raise _err(
