@@ -81,6 +81,9 @@ def test_rotate_key_writes_new_key_and_preserves_other_keys(
         "AMPERSTAND_API_KEY=oldkey\nAMPERSTAND_DATA_DIR=/var/lib/amperstand/vault\n",
         encoding="utf-8",
     )
+    # bootstrap.sh establishes 0640; rotate-key must preserve whatever the
+    # original file had, not force its own mode.
+    env_file.chmod(0o640)
 
     r = runner.invoke(app, ["rotate-key", "--env-file", str(env_file)])
     assert r.exit_code == 0, r.stdout
@@ -94,23 +97,21 @@ def test_rotate_key_writes_new_key_and_preserves_other_keys(
     assert len(new_key) == 64  # 32 bytes hex
     assert new_key in r.stdout  # printed once, only chance to copy it
 
-    # mode is 0600
+    # mode of the original file is preserved across the atomic replace
     mode = oct(env_file.stat().st_mode & 0o777)
-    assert mode == "0o600", mode
+    assert mode == "0o640", mode
 
 
 def test_rotate_key_requires_env_file(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # If neither --env-file nor the default /etc/amperstand/env exists, error out.
+    # Pointing at a nonexistent env file must be refused: minting a key into
+    # a fresh file would silently rotate every client (see rotate_key.run).
     monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path / "vault"))
     fake_env = tmp_path / "no-such-env"
     r = runner.invoke(app, ["rotate-key", "--env-file", str(fake_env)])
-    # The CLI happily creates the file at the chosen path → success is acceptable.
-    # The actual "needs --env-file" guard is when env_file is None, which we
-    # cover by ensuring the default DEFAULT_ENV_FILE is non-None.
-    assert r.exit_code == 0
-    assert fake_env.exists()
+    assert r.exit_code == 2
+    assert not fake_env.exists()
 
 
 # ── backup ───────────────────────────────────────────────────────────

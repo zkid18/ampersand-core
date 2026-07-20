@@ -539,7 +539,9 @@ def test_search_hybrid_503_when_vec_unavailable(client: TestClient) -> None:
         json={"q": "alpha", "limit": 5},
     )
     assert r.status_code == 503
-    assert "OPENAI_API_KEY" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["error"] == "feature_requires_openai_key"
+    assert "OPENAI_API_KEY" in detail["detail"]
 
 
 def test_search_hybrid_503_when_rerank_requested_but_disabled(
@@ -560,10 +562,22 @@ def test_search_hybrid_503_when_rerank_requested_but_disabled(
     assert r.status_code == 503
 
 
-def test_openapi_404_when_docs_hidden(client: TestClient) -> None:
-    # Default app has docs disabled so the API surface isn't advertised publicly.
-    assert client.get("/openapi.json").status_code == 404
-    assert client.get("/docs").status_code == 404
+def test_openapi_404_when_docs_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Docs are visible by default (integrators need a discoverable schema);
+    # paranoid deploys hide them via docs_visible=False / AMPERSTAND_HIDE_DOCS.
+    from amperstand_core.server.app import create_app
+    from amperstand_core.server.vault_api.store_factory import reset_store_cache
+
+    monkeypatch.setenv("AMPERSTAND_API_KEY", "devkey")
+    monkeypatch.setenv("AMPERSTAND_DATA_DIR", str(tmp_path))
+    reset_store_cache()
+    app2 = create_app(docs_visible=False)
+    c = TestClient(app2)
+    assert c.get("/openapi.json").status_code == 404
+    assert c.get("/docs").status_code == 404
+    reset_store_cache()
 
 
 # ── async capture queue (extension's clip flow) ────────────────────
