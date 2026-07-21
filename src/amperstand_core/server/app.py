@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -582,13 +582,11 @@ def create_app(*, docs_visible: bool | None = None) -> FastAPI:
     # "arbitrary-file-overwrite via env-var" confused-deputy).
     _frozen_env_file = Path(os.environ.get("AMPERSTAND_ENV_FILE", "/etc/amperstand/env"))
 
-    from fastapi import Request as _Request
-
     @app.post(
         "/admin/rotate-key",
         dependencies=[Depends(require_api_key)],
     )
-    def admin_rotate_key(request: _Request) -> dict:
+    def admin_rotate_key(request: Request) -> dict:
         """Mint a new AMPERSTAND_API_KEY, write it to the env file, update the
         running process's in-memory key so the new value is accepted immediately.
 
