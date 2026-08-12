@@ -93,6 +93,14 @@ def _extract_from_message(msg: EmailMessage) -> CapturedContent:
     if html_body:
         logger.debug("Using HTML body (%d chars)", len(html_body))
         markdown = _html_to_clean_markdown(html_body)
+        if not markdown.strip():
+            plain_body = _get_plain_body(msg)
+            if plain_body and plain_body.strip():
+                logger.warning(
+                    "HTML extraction returned no content for %r; using text/plain fallback",
+                    subject,
+                )
+                markdown = plain_body.strip()
     else:
         plain_body = _get_plain_body(msg)
         logger.debug("Using plain text body (%d chars)", len(plain_body) if plain_body else 0)
@@ -240,6 +248,13 @@ def _clean_markdown(md: str) -> str:
     for line in lines:
         lower = line.lower().strip()
 
+        # These links are commonly placed in the preheader, before the actual
+        # newsletter body. Drop only the chrome line; treating it as a footer
+        # marker discards the entire body for templates such as Stratechery
+        # (and everything after the banner for TechCrunch/Sailthru).
+        if "view in browser" in lower or "view this email" in lower:
+            continue
+
         # Skip "forwarded this newsletter" subscribe prompts (ConvertKit, etc.)
         if "forwarded this newsletter" in lower or "forwarded this email" in lower:
             continue
@@ -249,8 +264,6 @@ def _clean_markdown(md: str) -> str:
             "unsubscribe",
             "update your preferences",
             "manage your subscription",
-            "view in browser",
-            "view this email",
             "email preferences",
             "you are receiving this",
             "this email was sent",

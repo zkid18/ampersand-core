@@ -91,7 +91,7 @@ Replace the body. The `id`, `created_at`, and `body_hash` are server-controlled 
 curl -X PUT http://localhost:8765/vault/01JK... \
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
-    -d '{"content": "# Updated body\n\n..."}'
+    -d '{"body": "# Updated body\n\n..."}'
 ```
 
 ## DELETE /vault/{doc_id}
