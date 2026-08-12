@@ -246,7 +246,19 @@ class MarkdownStore:
                 f"if_match mismatch (expected {existing.meta.content_hash})"
             )
         target = self.root / existing.meta.path
-        user_meta = dict(frontmatter_in or {})
+        # PUT/update is primarily a body replacement. Preserve the existing
+        # user-controlled frontmatter unless the caller explicitly overrides
+        # individual keys; otherwise a body-only update silently erases title,
+        # source, type, tags, and arbitrary metadata such as sender_email.
+        user_meta = dict(existing.meta.extra or {})
+        user_meta.update({
+            "title": existing.meta.title,
+            "source": existing.meta.source,
+            "type": existing.meta.content_type,
+            "tags": existing.meta.tags,
+        })
+        if frontmatter_in is not None:
+            user_meta.update(frontmatter_in)
         now = _now()
         doc = self._write(
             doc_id=doc_id,

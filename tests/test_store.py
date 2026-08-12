@@ -56,6 +56,30 @@ def test_update_with_correct_if_match(tmp_path: Path) -> None:
     assert s.get(doc.meta.id).body == "v2\n"
 
 
+def test_body_only_update_preserves_frontmatter(tmp_path: Path) -> None:
+    s = make_store(tmp_path)
+    doc = s.create(
+        "v1\n",
+        {
+            "title": "Newsletter",
+            "source": "email://msg-id/example",
+            "type": "newsletter",
+            "tags": ["paid"],
+            "author": "Writer",
+            "sender_email": "writer@example.com",
+        },
+    )
+
+    updated = s.update(doc.meta.id, "v2\n")
+
+    assert updated.meta.title == "Newsletter"
+    assert updated.meta.source == "email://msg-id/example"
+    assert updated.meta.content_type == "newsletter"
+    assert updated.meta.tags == ["paid"]
+    assert updated.meta.extra["author"] == "Writer"
+    assert updated.meta.extra["sender_email"] == "writer@example.com"
+
+
 def test_update_with_stale_if_match_raises_conflict(tmp_path: Path) -> None:
     s = make_store(tmp_path)
     doc = s.create("v1\n", {"title": "T"})
