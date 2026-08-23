@@ -80,7 +80,7 @@
       "anchors": [
         {
           "anchor": "GitHub",
-          "href": "https://github.com/zkid18/ampersand-core",
+          "href": "https://github.com/zkid18/amperstand-core",
           "icon": "github"
         },
         {
@@ -98,7 +98,7 @@
   "navbar": {
     "primary": {
       "type": "github",
-      "href": "https://github.com/zkid18/ampersand-core"
+      "href": "https://github.com/zkid18/amperstand-core"
     }
   },
   "footer": {

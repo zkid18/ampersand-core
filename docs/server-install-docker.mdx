@@ -30,7 +30,7 @@ docker compose version
 ## Quick start
 
 ```bash
-git clone https://github.com/zkid18/ampersand-core /opt/amperstand-core
+git clone https://github.com/zkid18/amperstand-core /opt/amperstand-core
 cd /opt/amperstand-core/deploy
 
 # Generate the API key + optional OpenAI key into .env (one time):
@@ -78,7 +78,7 @@ The compose file is **server-only**. These run as separate processes outside the
 
 | Component | Why it's not bundled |
 | --- | --- |
-| Telegram bot | Lives in a separate repo ([`amperstand-bot`](https://github.com/zkid18/ampersand-tg-bot)). One bot per Amperstand server is the usual shape, but yours may not need one — bundling forces the dep. |
+| Telegram bot | Lives in a separate repo ([`amperstand-bot`](https://github.com/zkid18/amperstand-tg-bot)). One bot per Amperstand server is the usual shape, but yours may not need one — bundling forces the dep. |
 | Browser extension | Runs in your browser, not on the host. |
 | Email watcher | Needs interactive IMAP setup (credentials, OAuth flow). Bundle once your config is stable. |
 | Vault watcher | Auto-reindexes hand-edited files. Bundle if you edit markdown directly in mounted volumes. |

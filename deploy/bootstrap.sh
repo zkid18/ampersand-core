@@ -32,7 +32,7 @@ DATA_DIR="/var/lib/amperstand/vault"
 ENV_FILE="/etc/amperstand/env"
 VENV_DIR="${REPO_ROOT}/venv"
 PORT="${PORT:-8765}"
-CLI_REPO_URL="${CLI_REPO_URL:-https://github.com/zkid18/amperstand.git}"
+CLI_REPO_URL="${CLI_REPO_URL:-https://github.com/zkid18/amperstand-cli.git}"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "error: must run as root (try: sudo bash $0)" >&2
