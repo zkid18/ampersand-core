@@ -22,7 +22,7 @@ One server, N clients, HTTP between them. The bot and extension aren't special â
 
 ```bash
 # On a fresh Ubuntu droplet:
-git clone https://github.com/zkid18/ampersand-core /opt/amperstand/amperstand-core
+git clone https://github.com/zkid18/amperstand-core /opt/amperstand/amperstand-core
 cd /opt/amperstand/amperstand-core
 sudo bash deploy/bootstrap.sh
 ```
@@ -44,7 +44,7 @@ The sidebar covers: Set up a server, Use the CLI, Build with AI agents, Build a 
 
 | Repo | What |
 | --- | --- |
-| [`amperstand`](https://github.com/zkid18/amperstand) | CLI client (thin HTTP wrapper). `pip install amperstand`. |
+| [`amperstand-cli`](https://github.com/zkid18/amperstand-cli) | CLI client. Local-first â€” imports this repo as a library and captures without a server; acts as a thin HTTP wrapper when pointed at one. `pip install amperstand`. |
 | [`amperstand-tg-bot`](https://github.com/zkid18/amperstand-tg-bot) | Telegram bot. DM URLs, get markdown saved. |
 | [`amperstand-extension`](https://github.com/zkid18/amperstand-extension) | Chrome MV3 clipper. One-click save. |
 | `prompts/` | Drop-in system prompts for embedding the vault into Cursor, Custom GPTs, n8n, Claude Code, etc. |
