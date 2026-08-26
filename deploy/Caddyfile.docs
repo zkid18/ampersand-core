@@ -1,0 +1,23 @@
+# Documentation site — the static Mintlify export, served straight off disk.
+#
+# Append this block to the Caddyfile already in use (Caddyfile.no-tls or
+# Caddyfile.tls); it stands alongside the API rather than replacing it.
+# Publish content with deploy/publish-docs.sh, then open the port:
+#
+#     ufw allow 8080/tcp
+#     systemctl reload caddy
+#
+# The export links every asset from the site root (/_next/...), so the docs
+# need a root of their own. That is what the separate port buys — under a
+# subpath like /docs the asset requests would fall through to the API.
+#
+# Once a domain is attached, prefer a `docs.your-domain.com` block over the
+# port: same root/file_server body, and Caddy provisions TLS for it.
+
+:8080 {
+    encode gzip zstd
+    header -Server
+    root * /var/www/amperstand-docs
+    try_files {path} {path}/index.html {path}.html
+    file_server
+}
